@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Okidoc brand: navy splash background, teal accent -->
+    <color name="splash_background">#071D29</color>
+    <color name="brand_teal">#14B8A6</color>
+</resources>

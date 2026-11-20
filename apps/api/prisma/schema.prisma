@@ -1,0 +1,871 @@
+// Okidoc data model — see docs/PRD.md §5.
+// Money is stored as integer paise. Calendar dates are IST "YYYY-MM-DD" strings, times are "HH:mm".
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  CLINIC_OWNER
+  QUEUE_MANAGER
+  ADMIN_SUPER
+  ADMIN_OPS
+  ADMIN_FINANCE
+  ADMIN_SUPPORT
+}
+
+enum PaymentMode {
+  PAY_AT_CLINIC
+  ONLINE_BOOKING_FEE
+  ONLINE_FULL
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  BOOKED
+  PRESENT
+  LATE
+  SKIPPED
+  IN_CONSULTATION
+  SERVED
+  NO_SHOW
+  CANCELLED
+}
+
+enum BookingSource {
+  ONLINE
+  WALK_IN
+  OFFLINE
+}
+
+enum SittingStatus {
+  SCHEDULED
+  ONLINE
+  PAUSED
+  ENDED
+  CANCELLED
+}
+
+enum DoctorPresence {
+  NOT_ARRIVED
+  ONLINE
+  ON_BREAK
+  DELAYED
+}
+
+enum LinkStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  REMOVED
+}
+
+enum VerificationStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  INFO_REQUESTED
+}
+
+// ---------------------------------------------------------------- Identity
+
+model User {
+  id                String    @id @default(cuid())
+  phone             String    @unique
+  email             String?   @unique
+  name              String
+  language          String    @default("bn")
+  gender            String?
+  birthYear         Int?
+  areaId            String?
+  status            String    @default("ACTIVE") // ACTIVE | BLOCKED | DELETED
+  blockedReason     String?
+  phoneVerifiedAt   DateTime?
+  notifyPrefs       Json?
+  turnNearThreshold Int?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  area          Area?            @relation(fields: [areaId], references: [id])
+  credential    Credential?
+  roles         RoleAssignment[]
+  devices       Device[]
+  family        FamilyMember[]
+  doctor        Doctor?
+  ownedClinics  Clinic[]         @relation("ClinicOwner")
+  bookings      Booking[]        @relation("PatientBookings")
+  notifications Notification[]
+  records       Record[]
+  reviews       Review[]
+  tickets       SupportTicket[]  @relation("TicketUser")
+  noShows       NoShowRecord[]
+  blocks        PatientBlock[]
+}
+
+model Credential {
+  userId            String    @id
+  passwordHash      String
+  backupCodeHash    String?
+  passwordChangedAt DateTime  @default(now())
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RoleAssignment {
+  id        String   @id @default(cuid())
+  userId    String
+  role      Role
+  clinicId  String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clinic    Clinic?  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([clinicId])
+}
+
+/// A logged-in device or browser session. Quick-login credentials are bound to the device (AUTH-06/07).
+model Device {
+  id               String    @id @default(cuid())
+  userId           String
+  deviceId         String
+  name             String?
+  platform         String    @default("android") // android | ios | web
+  quickLoginMethod String? // PASSCODE | BIOMETRIC
+  passcodeHash     String?
+  deviceSecretHash String?
+  failedAttempts   Int       @default(0)
+  refreshTokenHash String?
+  refreshExpiresAt DateTime?
+  pushToken        String?
+  revokedAt        DateTime?
+  lastSeenAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+}
+
+model OtpChallenge {
+  id          String    @id @default(cuid())
+  phone       String
+  userId      String?
+  purpose     String // SIGNUP | RESET | LOGIN_2FA
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int       @default(0)
+  resendCount Int       @default(0)
+  lastSentAt  DateTime  @default(now())
+  consumedAt  DateTime?
+  payload     Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([phone, purpose])
+}
+
+model FamilyMember {
+  id        String    @id @default(cuid())
+  ownerId   String
+  name      String
+  relation  String
+  gender    String?
+  birthYear Int?
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+  records   Record[]
+}
+
+// ---------------------------------------------------------------- Geography & taxonomy
+
+model Region {
+  id       String @id @default(cuid())
+  state    String
+  district String
+  name     String
+  areas    Area[]
+
+  @@unique([state, district])
+}
+
+model Area {
+  id       String   @id @default(cuid())
+  regionId String
+  name     String
+  nameBn   String?
+  pin      String
+  lat      Float?
+  lng      Float?
+  active   Boolean  @default(true)
+  region   Region   @relation(fields: [regionId], references: [id])
+  clinics  Clinic[]
+  users    User[]
+
+  @@index([pin])
+  @@index([regionId])
+}
+
+model Specialty {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  patientName String?
+  nameBn      String?
+  nameHi      String?
+  icon        String?
+  keywords    String[] @default([])
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  doctors     Doctor[]
+}
+
+// ---------------------------------------------------------------- Providers
+
+model Doctor {
+  id                        String             @id @default(cuid())
+  userId                    String             @unique
+  registrationNo            String?
+  council                   String?
+  degrees                   String?
+  experienceYears           Int?
+  about                     String?
+  languagesSpoken           String[] @default([])
+  photoUrl                  String?
+  verification              VerificationStatus @default(DRAFT)
+  verificationNote          String?
+  verifiedAt                DateTime?
+  defaultBookingWindowHours Int?
+  canRunQueue               Boolean            @default(true)
+  ratingAvg                 Float?
+  ratingCount               Int                @default(0)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialties Specialty[]
+  documents   DoctorDocument[]
+  links       ClinicDoctorLink[]
+  exceptions  SittingException[]
+  freeHours   FreeHours[]
+  reviews     Review[]
+}
+
+model DoctorDocument {
+  id        String   @id @default(cuid())
+  doctorId  String
+  kind      String // REGISTRATION | DEGREE | PHOTO_ID | OTHER
+  fileKey   String
+  createdAt DateTime @default(now())
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+}
+
+model Clinic {
+  id                 String             @id @default(cuid())
+  code               String             @unique
+  name               String
+  type               String
+  addressLine        String
+  areaId             String
+  pin                String
+  lat                Float?
+  lng                Float?
+  phone              String?
+  about              String?
+  openingHours       String?
+  photos             String[] @default([])
+  drugLicenceNo      String?
+  verification       VerificationStatus @default(PENDING)
+  verificationNote   String?
+  verifiedAt         DateTime?
+  bookingWindowHours Int?
+  cutoffMinutes      Int?
+  /// BR-06a: a late patient who arrives is seen after this many more patients (0 = right after the current one).
+  lateRejoinAfter    Int                @default(2)
+  payoutUpi          String?
+  payoutAccount      String?
+  payoutIfsc         String?
+  ownerId            String
+  planId             String?
+  ratingAvg          Float?
+  ratingCount        Int                @default(0)
+  active             Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  owner            User                    @relation("ClinicOwner", fields: [ownerId], references: [id])
+  area             Area                    @relation(fields: [areaId], references: [id])
+  plan             Plan?                   @relation(fields: [planId], references: [id])
+  staff            RoleAssignment[]
+  links            ClinicDoctorLink[]
+  featureOverrides ClinicFeatureOverride[]
+  subscriptions    ClinicSubscription[]
+  openSlots        OpenSlot[]
+  blocks           PatientBlock[]
+  noShows          NoShowRecord[]
+  reviews          Review[]
+}
+
+model Plan {
+  id                String               @id @default(cuid())
+  code              String               @unique
+  name              String
+  priceMonthlyPaise Int                  @default(0)
+  priceYearlyPaise  Int?
+  trialDays         Int                  @default(0)
+  features          Json
+  limits            Json
+  active            Boolean              @default(true)
+  sortOrder         Int                  @default(0)
+  clinics           Clinic[]
+  subscriptions     ClinicSubscription[]
+}
+
+model ClinicFeatureOverride {
+  id       String   @id @default(cuid())
+  clinicId String
+  key      String
+  enabled  Boolean?
+  limit    Int?
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, key])
+}
+
+model ClinicSubscription {
+  id               String    @id @default(cuid())
+  clinicId         String
+  planId           String
+  status           String // TRIAL | ACTIVE | GRACE | CANCELLED | EXPIRED
+  period           String    @default("MONTHLY")
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  gatewaySubId     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  clinic           Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  plan             Plan      @relation(fields: [planId], references: [id])
+  invoices         Invoice[]
+}
+
+model Invoice {
+  id             String              @id @default(cuid())
+  number         String              @unique
+  clinicId       String
+  subscriptionId String?
+  amountPaise    Int
+  taxPaise       Int                 @default(0)
+  status         String // DUE | PAID | VOID
+  issuedAt       DateTime            @default(now())
+  paidAt         DateTime?
+  subscription   ClinicSubscription? @relation(fields: [subscriptionId], references: [id])
+}
+
+model ClinicDoctorLink {
+  id                 String     @id @default(cuid())
+  clinicId           String
+  doctorId           String
+  status             LinkStatus @default(PENDING)
+  initiatedBy        String // CLINIC | DOCTOR
+  consultationFee    Int        @default(0)
+  clinicSplitPercent Float      @default(0)
+  walkInEvery        Int?
+  avgConsultMinutes  Float?
+  declineReason      String?
+  createdAt          DateTime   @default(now())
+  respondedAt        DateTime?
+  clinic             Clinic     @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor             Doctor     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  sittings           Sitting[]
+
+  @@unique([clinicId, doctorId])
+}
+
+/// Recurring sitting rule.
+model Sitting {
+  id            String             @id @default(cuid())
+  linkId        String
+  weekdays      Int[] @default([])
+  startTime     String
+  endTime       String
+  recurrence    String             @default("WEEKLY") // WEEKLY | ALTERNATE_WEEKS | SPECIFIC_DATES
+  specificDates String[] @default([])
+  anchorDate    String?
+  maxPatients   Int?
+  validFrom     String
+  validTo       String?
+  active        Boolean            @default(true)
+  createdById   String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  link          ClinicDoctorLink   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  instances     SittingInstance[]
+  exceptions    SittingException[]
+}
+
+model SittingException {
+  id        String   @id @default(cuid())
+  doctorId  String
+  sittingId String?
+  fromDate  String
+  toDate    String
+  type      String   @default("OFF") // OFF | CHANGED_TIME
+  startTime String?
+  endTime   String?
+  reason    String?
+  createdAt DateTime @default(now())
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  sitting   Sitting? @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+}
+
+/// One dated occurrence of a sitting (created lazily).
+model SittingInstance {
+  id              String         @id @default(cuid())
+  sittingId       String
+  date            String
+  startTime       String
+  endTime         String
+  status          SittingStatus  @default(SCHEDULED)
+  presence        DoctorPresence @default(NOT_ARRIVED)
+  delayMinutes    Int            @default(0)
+  bookingsOpen    Boolean        @default(true)
+  nowServingToken Int?
+  onlineAt        DateTime?
+  endedAt         DateTime?
+  cancelledReason String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  sitting         Sitting        @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+  bookings        Booking[]
+  events          QueueEvent[]
+
+  @@unique([sittingId, date])
+  @@index([date])
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  instanceId      String
+  patientUserId   String?
+  memberId        String?
+  patientName     String
+  patientPhone    String?
+  source          BookingSource
+  tokenNo         Int
+  status          BookingStatus @default(BOOKED)
+  paymentMode     PaymentMode   @default(PAY_AT_CLINIC)
+  consultationFee Int           @default(0)
+  bookingFee      Int           @default(0)
+  tax             Int           @default(0)
+  payableNow      Int           @default(0)
+  paidOnline      Int           @default(0)
+  paidAtClinic    Boolean       @default(false)
+  paidVia         String?
+  note            String?
+  clientRef       String?
+  createdById     String?
+  holdExpiresAt   DateTime?
+  presentAt       DateTime?
+  recalledAt      DateTime?
+  /// BR-06a: patients still to be called before a returned late patient (set when they come back).
+  rejoinAfter     Int?
+  /// Patient tapped "I'm here" in the app; staff confirm with Arrived.
+  checkInAt       DateTime?
+  /// Times this booking was moved to a later sitting, and the sitting it came from ("YYYY-MM-DD HH:mm").
+  moveCount       Int           @default(0)
+  movedFrom       String?
+  calledAt        DateTime?
+  servedAt        DateTime?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancelReason    String?
+  noShowAt        DateTime?
+  reminderSentAt  DateTime?
+  nearAlertSentAt DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  instance      SittingInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  patient       User?           @relation("PatientBookings", fields: [patientUserId], references: [id])
+  member        FamilyMember?   @relation(fields: [memberId], references: [id])
+  payments      Payment[]
+  review        Review?
+  noShow        NoShowRecord?
+  sharedRecords Record[]        @relation("BookingSharedRecords")
+
+  @@unique([instanceId, tokenNo])
+  @@unique([instanceId, clientRef])
+  @@index([patientUserId, status])
+}
+
+model QueueEvent {
+  id         String          @id @default(cuid())
+  instanceId String
+  bookingId  String?
+  type       String
+  actorId    String?
+  data       Json?
+  createdAt  DateTime        @default(now())
+  instance   SittingInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, createdAt])
+}
+
+// ---------------------------------------------------------------- Payments & money
+
+/// Layered payment configuration (BR-09). scopeId = "GLOBAL" for PLATFORM.
+model PaymentConfig {
+  id                       String        @id @default(cuid())
+  scope                    String // PLATFORM | REGION | CLINIC | DOCTOR | SITTING
+  scopeId                  String
+  allowedModes             PaymentMode[] @default([])
+  selectedMode             PaymentMode?
+  locked                   Boolean       @default(false)
+  bookingFeePaise          Int?
+  commissionPercent        Float?
+  commissionFlatPaise      Int?
+  taxPercent               Float?
+  patientFullRefundMinutes Int?
+  updatedById              String?
+  updatedAt                DateTime      @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
+model Payment {
+  id               String    @id @default(cuid())
+  bookingId        String?
+  clinicId         String?
+  purpose          String // BOOKING | SUBSCRIPTION
+  gateway          String // MOCK | RAZORPAY
+  gatewayOrderId   String    @unique
+  gatewayPaymentId String?
+  amountPaise      Int
+  refundedPaise    Int       @default(0)
+  status           String // CREATED | PAID | FAILED | REFUNDED | PARTIALLY_REFUNDED
+  raw              Json?
+  createdAt        DateTime  @default(now())
+  paidAt           DateTime?
+  booking          Booking?  @relation(fields: [bookingId], references: [id])
+  refunds          Refund[]
+}
+
+model Refund {
+  id              String   @id @default(cuid())
+  paymentId       String
+  amountPaise     Int
+  reason          String
+  status          String // PENDING | PROCESSED | FAILED
+  gatewayRefundId String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  payment         Payment  @relation(fields: [paymentId], references: [id])
+}
+
+model LedgerEntry {
+  id          String   @id @default(cuid())
+  bookingId   String?
+  clinicId    String?
+  doctorId    String?
+  type        String // CONSULTATION_FEE | CLINIC_SHARE | DOCTOR_SHARE | COMMISSION | BOOKING_FEE | TAX | REFUND | PAID_AT_CLINIC | SUBSCRIPTION
+  party       String // CLINIC | DOCTOR | OKIDOC | PATIENT
+  amountPaise Int
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([clinicId, createdAt])
+  @@index([doctorId, createdAt])
+  @@index([bookingId])
+}
+
+model Settlement {
+  id          String    @id @default(cuid())
+  party       String // CLINIC | DOCTOR
+  clinicId    String?
+  doctorId    String?
+  periodFrom  String
+  periodTo    String
+  amountDue   Int
+  amountPaid  Int       @default(0)
+  status      String    @default("DUE") // DUE | PAID
+  reference   String?
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------- No-shows & blocks (BR-07)
+
+model NoShowRecord {
+  id            String   @id @default(cuid())
+  userId        String
+  memberId      String?
+  bookingId     String   @unique
+  clinicId      String
+  date          String
+  corrected     Boolean  @default(false)
+  correctedById String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id])
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+
+  @@index([userId, clinicId])
+}
+
+model PatientBlock {
+  id          String    @id @default(cuid())
+  userId      String?
+  phone       String
+  scope       String // CLINIC | PLATFORM
+  clinicId    String?
+  reason      String
+  noShowCount Int
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  liftedById  String?
+  liftedAt    DateTime?
+  liftReason  String?
+  user        User?     @relation(fields: [userId], references: [id])
+  clinic      Clinic?   @relation(fields: [clinicId], references: [id])
+
+  @@index([phone, active])
+}
+
+// ---------------------------------------------------------------- Monetization & config
+
+model RevenueSetting {
+  id            String    @id @default(cuid())
+  stream        String
+  scope         String // PLATFORM | REGION | CLINIC
+  scopeId       String // GLOBAL for PLATFORM
+  enabled       Boolean
+  effectiveFrom DateTime?
+  updatedById   String?
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([stream, scope, scopeId])
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AdPlacement {
+  key                String  @id
+  enabled            Boolean @default(true)
+  source             String  @default("HOUSE_THEN_ADMOB")
+  admobUnitAndroid   String?
+  admobUnitIos       String?
+  frequencyCapPerDay Int     @default(0)
+}
+
+model AdCampaign {
+  id          String   @id @default(cuid())
+  advertiser  String
+  title       String
+  body        String?
+  imageUrl    String?
+  ctaLabel    String?
+  ctaUrl      String?
+  category    String
+  placements  String[] @default([])
+  areaIds     String[] @default([])
+  startsAt    DateTime
+  endsAt      DateTime
+  active      Boolean  @default(true)
+  priority    Int      @default(10)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model AdEvent {
+  id         String   @id @default(cuid())
+  campaignId String?
+  placement  String
+  type       String // IMPRESSION | CLICK
+  source     String   @default("HOUSE")
+  userId     String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AdRevenueEntry {
+  id          String   @id @default(cuid())
+  date        String
+  source      String // ADMOB | DIRECT
+  amountPaise Int
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- Engagement
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// PAT-16: one review per served visit. `rating` rates the doctor, `clinicRating` the clinic; at least one is set.
+model Review {
+  id           String   @id @default(cuid())
+  bookingId    String   @unique
+  doctorId     String
+  clinicId     String
+  userId       String
+  rating       Int?
+  clinicRating Int?
+  comment      String?
+  hidden    Boolean  @default(false)
+  reports   Int      @default(0)
+  createdAt DateTime @default(now())
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@index([clinicId])
+}
+
+model Record {
+  id         String        @id @default(cuid())
+  ownerId    String
+  memberId   String?
+  title      String
+  type       String        @default("OTHER")
+  doctorName String?
+  recordDate String?
+  fileKey    String
+  mimeType   String
+  size       Int
+  createdAt  DateTime      @default(now())
+  deletedAt  DateTime?
+  owner      User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  member     FamilyMember? @relation(fields: [memberId], references: [id])
+  bookings   Booking[]     @relation("BookingSharedRecords")
+}
+
+model BonusCampaign {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  metric      String // PATIENTS_SERVED | DOCTORS_ADDED | ONLINE_BOOKINGS
+  target      Int
+  rewardPaise Int
+  startsAt    String
+  endsAt      String
+  clinicIds   String[] @default([])
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  payouts     BonusPayout[]
+}
+
+model BonusPayout {
+  id           String        @id @default(cuid())
+  campaignId   String
+  clinicId     String
+  achieved     Int
+  amountPaise  Int
+  status       String        @default("PENDING") // PENDING | APPROVED | PAID | REJECTED
+  approvedById String?
+  createdAt    DateTime      @default(now())
+  campaign     BonusCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, clinicId])
+}
+
+model FreeHours {
+  id        String   @id @default(cuid())
+  doctorId  String
+  areaId    String?
+  weekdays  Int[] @default([])
+  startTime String
+  endTime   String
+  note      String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+}
+
+model OpenSlot {
+  id           String   @id @default(cuid())
+  clinicId     String
+  weekdays     Int[] @default([])
+  startTime    String
+  endTime      String
+  specialtyIds String[] @default([])
+  note         String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  clinic       Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+}
+
+model SupportTicket {
+  id           String          @id @default(cuid())
+  userId       String
+  category     String
+  subject      String
+  status       String          @default("OPEN") // OPEN | PENDING | RESOLVED | CLOSED
+  clinicId     String?
+  bookingId    String?
+  assignedToId String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  user         User            @relation("TicketUser", fields: [userId], references: [id], onDelete: Cascade)
+  messages     TicketMessage[]
+}
+
+model TicketMessage {
+  id        String        @id @default(cuid())
+  ticketId  String
+  authorId  String
+  body      String
+  fromStaff Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model Translation {
+  id        String   @id @default(cuid())
+  language  String
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@unique([language, key])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

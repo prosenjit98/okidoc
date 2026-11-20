@@ -1,0 +1,10 @@
+{
+  "name": "Okidoc",
+  "displayName": "Okidoc",
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-3940256099942544~3347511713",
+    "ios_app_id": "ca-app-pub-3940256099942544~1458002511",
+    "delay_app_measurement_init": true,
+    "user_tracking_usage_description": "Okidoc shows ads to keep the app free. Ads are not based on your health information."
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "okidoc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Okidoc – clinic queue & doctor booking platform (API, web console/admin, mobile app)",
+  "workspaces": [
+    "packages/*",
+    "apps/api",
+    "apps/web",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @okidoc/shared",
+    "db:start": "node scripts/dev-db.mjs",
+    "db:migrate": "npm run prisma:migrate -w @okidoc/api",
+    "db:seed": "npm run seed -w @okidoc/api",
+    "dev:api": "npm run dev -w @okidoc/api",
+    "dev:web": "npm run dev -w @okidoc/web",
+    "dev:mobile": "npm run start -w @okidoc/mobile",
+    "test": "npm run test -w @okidoc/shared && npm run test -w @okidoc/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

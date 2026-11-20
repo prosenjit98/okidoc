@@ -1,0 +1,42 @@
+# Okidoc mobile (bare React Native)
+node_modules/
+build/
+*.log
+.env
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/.kotlin/
+android/local.properties
+android/app/release/
+*.jks
+*.keystore
+!android/app/debug.keystore
+android/app/google-services.json
+
+# iOS
+ios/Pods/
+ios/build/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/.xcode.env.local
+ios/GoogleService-Info.plist
+ios/Okidoc/GoogleService-Info.plist
+*.p8
+*.p12
+*.mobileprovision
+vendor/bundle/
+.bundle/
+
+# Metro
+.metro-health-check*
+
+# macOS
+.DS_Store
+
+# Android native build caches
+.cxx/
+.gradle/
+.kotlin/

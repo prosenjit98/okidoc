@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash logo (108 × 108 viewport): teal rounded square + white mark, kept inside the central circle
+  (radius 36) so Android 12+'s circular splash-icon mask never clips it. Shown at 240 dp on every API level,
+  so the visible tile is ~124 dp — the JS splash (src/components/BrandSplash.tsx) uses the same size.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="240dp"
+    android:height="240dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M40,26h28a14,14 0,0 1,14 14v28a14,14 0,0 1,-14 14h-28a14,14 0,0 1,-14 -14v-28a14,14 0,0 1,14 -14z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="26" android:startY="26"
+                android:endX="82" android:endY="82">
+                <item android:offset="0" android:color="#FF2DD4BF" />
+                <item android:offset="0.5" android:color="#FF14B8A6" />
+                <item android:offset="1" android:color="#FF0A766C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <group
+        android:scaleX="0.82"
+        android:scaleY="0.82"
+        android:translateX="27.76"
+        android:translateY="27.76">
+        <path
+            android:pathData="M15,29a14,14 0,1 0,28 0a14,14 0,1 0,-28 0"
+            android:strokeWidth="6"
+            android:strokeColor="#FFFFFFFF"
+            android:fillColor="#00000000" />
+        <path
+            android:pathData="M39.6,39.6L48.5,48.5"
+            android:strokeWidth="6.6"
+            android:strokeLineCap="round"
+            android:strokeColor="#FFFFFFFF" />
+        <path
+            android:pathData="M20.5,29h4.5l2.2,-4.6l4,9.2l2.2,-4.6h4.6"
+            android:strokeWidth="2.7"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeColor="#FFFFFFFF"
+            android:fillColor="#00000000" />
+    </group>
+</vector>

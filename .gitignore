@@ -1,0 +1,21 @@
+*.log
+*.tsbuildinfo
+.dev-db/
+.env
+.env.local
+.expo/
+.next/
+apps/api/api.log
+apps/web/web.log
+build/
+coverage/
+dist/
+node_modules/
+uploads/
+
+# Firebase service account for FCM push (never commit)
+*firebase-service-account*.json
+
+# Metro / OS
+.metro-health-check*
+.DS_Store
