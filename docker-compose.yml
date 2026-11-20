@@ -1,0 +1,69 @@
+# Okidoc on one Linux server: Postgres + API + web (landing page, clinic console, admin portal).
+#   cp .env.docker.example .env      # then fill in the values
+#   docker compose up -d --build
+# Full steps (first-time seed, HTTPS, backups, updates): docs/DEPLOY.md
+
+name: okidoc
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: okidoc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: okidoc
+      # UTF-8 so Bengali and Hindi text is stored correctly.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+      TZ: Asia/Kolkata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U okidoc -d okidoc"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published to the host; only the API reaches it on the internal network.
+
+  api:
+    build:
+      context: .
+      target: api
+    image: okidoc-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://okidoc:${POSTGRES_PASSWORD}@db:5432/okidoc?schema=public
+      STORAGE_DIR: /data/uploads
+      TZ: Asia/Kolkata
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/data/uploads
+      # Optional Firebase service account for push (set FCM_SERVICE_ACCOUNT_JSON=/run/secrets/fcm.json in .env):
+      # - ./secrets/firebase-service-account.json:/run/secrets/fcm.json:ro
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-4000}:4000"
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        # Baked into the browser bundle at build time — rebuild the web image if it changes.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL in .env}
+    image: okidoc-web:latest
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Kolkata
+    depends_on:
+      - api
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:
+  uploads:

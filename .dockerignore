@@ -1,0 +1,27 @@
+# Keep the build context small and never send secrets or local data into an image.
+.git
+**/node_modules
+**/dist
+**/.next
+**/build
+**/coverage
+**/*.log
+**/*.tsbuildinfo
+.dev-db
+**/uploads
+
+# Secrets: pass these at run time (docker-compose env_file), never bake them in
+**/.env
+**/.env.*
+!**/.env.example
+**/*firebase-service-account*.json
+
+# Not needed by the server images
+apps/mobile/*
+!apps/mobile/package.json
+docs
+scripts
+apps/api/scripts
+Dockerfile
+docker-compose*.yml
+.dockerignore

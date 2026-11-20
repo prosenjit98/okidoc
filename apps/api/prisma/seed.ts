@@ -105,8 +105,11 @@ const FREE_FEATURES = {
   WEB_CONSOLE: true,
 };
 
+/** SEED_DEMO=false (production): reference data + an admin from ADMIN_PHONE / ADMIN_PASSWORD, no demo accounts. */
+const DEMO = process.env.SEED_DEMO !== 'false';
+
 async function main() {
-  console.log('Seeding Okidoc (West Bengal pilot)…');
+  console.log(`Seeding Okidoc (West Bengal pilot)${DEMO ? ' with demo accounts' : ' — reference data only'}…`);
 
   // ---------------- geography
   const areaIds: Record<string, string> = {};
@@ -188,7 +191,7 @@ async function main() {
   for (const p of placements) {
     await prisma.adPlacement.upsert({ where: { key: p.key }, create: { ...p, enabled: true, source: p.key === 'SEARCH_SPONSORED' ? 'HOUSE' : 'HOUSE_THEN_ADMOB' }, update: {} });
   }
-  if (!(await prisma.adCampaign.count())) {
+  if (DEMO && !(await prisma.adCampaign.count())) {
     const now = new Date();
     const later = new Date(Date.now() + 180 * 86400_000);
     await prisma.adCampaign.createMany({
@@ -213,6 +216,24 @@ async function main() {
     }
     return u;
   };
+
+  if (!DEMO) {
+    // Production: reference data above only, plus one super-admin from the environment. No demo accounts.
+    const phone = process.env.ADMIN_PHONE?.trim();
+    const password = process.env.ADMIN_PASSWORD ?? '';
+    if (phone && password) {
+      if (!/^[6-9]\d{9}$/.test(phone)) throw new Error('ADMIN_PHONE must be a 10-digit Indian mobile number');
+      if (password.length < 10) throw new Error('ADMIN_PASSWORD must be at least 10 characters');
+      await user(phone, process.env.ADMIN_NAME?.trim() || 'Okidoc Admin', password, ['ADMIN_SUPER'], {
+        email: process.env.ADMIN_EMAIL?.trim() || undefined,
+        language: 'en',
+      });
+      console.log(`Seed complete (reference data + super-admin ${phone}).`);
+    } else {
+      console.log('Seed complete (reference data only). Set ADMIN_PHONE and ADMIN_PASSWORD to create the super-admin.');
+    }
+    return;
+  }
 
   await user('9000000001', 'Okidoc Admin', 'Admin@1234', ['ADMIN_SUPER'], { email: 'admin@okidoc.local', language: 'en' });
   const patient = await user('9000000301', 'Riya Das', 'Patient@123', ['PATIENT'], { areaId: areaIds['Barasat'], gender: 'FEMALE', birthYear: 1994 });
