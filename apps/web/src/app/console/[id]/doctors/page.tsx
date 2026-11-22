@@ -1,6 +1,6 @@
 'use client';
 
-import { dayList } from @okidoc / shared;
+import { dayList } from '@okidoc/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { use, useState } from 'react';
 import { Badge, Button, Card, Confirm, cx, Empty, ErrorBox, Field, Hero, Input, Modal, PageHeader, Select, Spinner, Stats, StatusBadge } from '@/components/ui';
