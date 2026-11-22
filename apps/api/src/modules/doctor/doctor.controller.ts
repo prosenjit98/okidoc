@@ -15,6 +15,7 @@ import {
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../../common/auth';
 import { bad, forbidden, must, Zod } from '../../common/http';
+import { sittingOutsideHours } from '../../common/hours';
 import { PrismaService } from '../../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EntitlementsService } from '../platform/platform.services';
@@ -38,7 +39,7 @@ export class DoctorController {
     private readonly entitlements: EntitlementsService,
     private readonly earnings: EarningsService,
     private readonly storage: StorageService,
-  ) {}
+  ) { }
 
   private async doctor(u: AuthUser) {
     return must(await this.prisma.doctor.findUnique({ where: { userId: u.id } }), 'Doctor profile');
@@ -141,6 +142,12 @@ export class DoctorController {
     this.realtime.emitClinic(clinicId, 'roster:changed', { clinicId });
   }
 
+  /** CLN-01a: weekdays on which a sitting is outside the clinic's opening hours (a warning, not an error). */
+  private async outsideClinicHours(clinicId: string, s: { weekdays: number[]; startTime: string; endTime: string; recurrence: string; specificDates: string[] }) {
+    const clinic = await this.prisma.clinic.findUnique({ where: { id: clinicId }, select: { weeklyHours: true } });
+    return sittingOutsideHours(clinic?.weeklyHours, s);
+  }
+
   @Post('sittings')
   async addSitting(@CurrentUser() u: AuthUser, @Body(new Zod(doctorSittingSchema)) dto: z.infer<typeof doctorSittingSchema>) {
     const d = await this.doctor(u);
@@ -152,8 +159,9 @@ export class DoctorController {
     const s = await this.prisma.sitting.create({
       data: { ...rest, linkId, specificDates: rest.specificDates ?? [], validFrom: rest.validFrom ?? todayIST(), createdById: u.id },
     });
-    await this.notifyClinicOfChange(link.clinicId, `Dr. ${u.name} added a sitting (${dto.startTime}–${dto.endTime}).`);
-    return s;
+    const outsideHours = await this.outsideClinicHours(link.clinicId, s);
+    await this.notifyClinicOfChange(link.clinicId, `Dr. ${u.name} added a sitting (${dto.startTime}–${dto.endTime})${outsideHours.length ? ' outside your opening hours' : ''}.`);
+    return { ...s, outsideHours };
   }
 
   @Patch('sittings/:id')
@@ -162,8 +170,9 @@ export class DoctorController {
     const s = must(await this.prisma.sitting.findUnique({ where: { id }, include: { link: true } }), 'Sitting');
     if (s.link.doctorId !== d.id) throw forbidden();
     const updated = await this.prisma.sitting.update({ where: { id }, data: dto });
-    await this.notifyClinicOfChange(s.link.clinicId, `Dr. ${u.name} changed a sitting.`);
-    return updated;
+    const outsideHours = await this.outsideClinicHours(s.link.clinicId, updated);
+    await this.notifyClinicOfChange(s.link.clinicId, `Dr. ${u.name} changed a sitting${outsideHours.length ? ' (now outside your opening hours)' : ''}.`);
+    return { ...updated, outsideHours };
   }
 
   @Delete('sittings/:id')
@@ -382,4 +391,4 @@ export class DoctorController {
 }
 
 @Module({ controllers: [DoctorController] })
-export class DoctorModule {}
+export class DoctorModule { }

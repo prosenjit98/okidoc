@@ -29,6 +29,7 @@ import {
   instanceActionSchema,
   liftBlockSchema,
   linkUpdateSchema,
+  newAreaSchema,
   openSlotSchema,
   PaymentMode,
   sittingSchema,
@@ -42,6 +43,7 @@ import { z } from 'zod';
 import { AuthUser, CurrentUser, isAdmin, loadAuthUser, Roles, verifyAccessToken } from '../../common/auth';
 import { AppError, bad, conflict, forbidden, must, Zod } from '../../common/http';
 import { PrismaService } from '../../common/prisma.service';
+import { clinicHoursData, sittingOutsideHours } from '../../common/hours';
 import { AuditService } from '../../common/settings.service';
 import { config } from '../../config';
 import { AuthModule } from '../auth/auth.controller';
@@ -64,7 +66,7 @@ export class WebConsoleGuard implements CanActivate {
   constructor(
     private readonly entitlements: EntitlementsService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
     const clinicId = req.params?.id;
@@ -78,6 +80,12 @@ export class WebConsoleGuard implements CanActivate {
     return true;
   }
 }
+
+/** "  salt   lake " → "Salt Lake"; mixed-case input ("DumDum Road") is kept as typed. */
+const tidyPlace = (s: string) => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t === t.toLowerCase() || t === t.toUpperCase() ? t.toLowerCase().replace(/(^|[\s(-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()) : t;
+};
 
 const genCode = () => {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -102,7 +110,7 @@ export class ClinicController {
     private readonly storage: StorageService,
     private readonly audit: AuditService,
     private readonly auth: AuthService,
-  ) {}
+  ) { }
 
   // ================================================================== registration & profile
 
@@ -113,10 +121,33 @@ export class ClinicController {
     must(await this.prisma.area.findUnique({ where: { id: dto.areaId } }), 'Area');
     let code = genCode();
     while (await this.prisma.clinic.findUnique({ where: { code } })) code = genCode();
-    const clinic = await this.prisma.clinic.create({ data: { ...dto, code, ownerId: u.id, verification: 'PENDING' } });
+    const { weeklyHours, ...rest } = dto;
+    const clinic = await this.prisma.clinic.create({ data: { ...rest, ...clinicHoursData(weeklyHours), code, ownerId: u.id, verification: 'PENDING' } });
     await this.auth.ensureRole(u.id, 'CLINIC_OWNER', clinic.id);
     await this.audit.log(u.id, 'CLINIC_REGISTERED', 'Clinic', clinic.id, undefined, { name: clinic.name, code });
     return clinic;
+  }
+
+  /**
+   * A clinic whose locality is not in the area list adds it (anywhere in India). An existing area with the same
+   * name and PIN in that district is reused, so patients see one entry. Okidoc admins can rename or merge later.
+   */
+  @Roles('CLINIC_OWNER')
+  @Post('areas')
+  async addArea(@CurrentUser() u: AuthUser, @Body(new Zod(newAreaSchema)) dto: z.infer<typeof newAreaSchema>) {
+    const name = tidyPlace(dto.name);
+    const district = tidyPlace(dto.district);
+    let region = await this.prisma.region.findFirst({ where: { state: dto.state, district: { equals: district, mode: 'insensitive' } } });
+    const existing = region && (await this.prisma.area.findFirst({ where: { regionId: region.id, pin: dto.pin, name: { equals: name, mode: 'insensitive' } }, include: { region: true } }));
+    if (existing) return existing;
+    const since = new Date(Date.now() - 86_400_000);
+    if ((await this.prisma.auditLog.count({ where: { actorId: u.id, action: 'AREA_ADDED', createdAt: { gte: since } } })) >= 5) {
+      throw new AppError(429, 'TOO_MANY_AREAS', 'You have added several areas today. Please pick one from the list, or contact Okidoc support.');
+    }
+    region ??= await this.prisma.region.create({ data: { state: dto.state, district, name: district } });
+    const area = await this.prisma.area.create({ data: { regionId: region.id, name, pin: dto.pin }, include: { region: true } });
+    await this.audit.log(u.id, 'AREA_ADDED', 'Area', area.id, undefined, { name, pin: dto.pin, district, state: dto.state });
+    return area;
   }
 
   @Get('clinic/mine')
@@ -188,7 +219,8 @@ export class ClinicController {
   @Patch('clinic/:id')
   async update(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body(new Zod(clinicUpdateSchema)) dto: z.infer<typeof clinicUpdateSchema>) {
     const { clinic } = await this.access.check(u, id, 'owner');
-    const updated = await this.prisma.clinic.update({ where: { id }, data: dto });
+    const { weeklyHours, ...rest } = dto;
+    const updated = await this.prisma.clinic.update({ where: { id }, data: { ...rest, ...clinicHoursData(weeklyHours) } });
     await this.audit.log(u.id, 'CLINIC_UPDATED', 'Clinic', id, clinic, updated);
     return updated;
   }
@@ -225,13 +257,13 @@ export class ClinicController {
         status: { not: 'REMOVED' },
         ...(q
           ? {
-              doctor: {
-                OR: [
-                  { user: { name: { contains: q, mode: 'insensitive' } } },
-                  { specialties: { some: { name: { contains: q, mode: 'insensitive' } } } },
-                ],
-              },
-            }
+            doctor: {
+              OR: [
+                { user: { name: { contains: q, mode: 'insensitive' } } },
+                { specialties: { some: { name: { contains: q, mode: 'insensitive' } } } },
+              ],
+            },
+          }
           : {}),
       },
       include: {
@@ -383,17 +415,18 @@ export class ClinicController {
       data: { clinicId: id },
     });
     this.realtime.emitClinic(id, 'roster:changed', { clinicId: id });
-    return s;
+    // Saved either way; the console warns when the sitting is outside the clinic's opening hours.
+    return { ...s, outsideHours: sittingOutsideHours(link.clinic.weeklyHours, s) };
   }
 
   @Patch('clinic/:id/sittings/:sid')
   async editSitting(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('sid') sid: string, @Body(new Zod(sittingSchema.partial())) dto: Partial<z.infer<typeof sittingSchema>>) {
     await this.access.check(u, id, 'owner');
-    const s = must(await this.prisma.sitting.findFirst({ where: { id: sid, link: { clinicId: id } }, include: { link: { include: { doctor: true } } } }), 'Sitting');
+    const s = must(await this.prisma.sitting.findFirst({ where: { id: sid, link: { clinicId: id } }, include: { link: { include: { doctor: true, clinic: { select: { weeklyHours: true } } } } } }), 'Sitting');
     const updated = await this.prisma.sitting.update({ where: { id: sid }, data: dto });
     await this.notifications.notify(s.link.doctor.userId, 'SITTING_CHANGED', { title: 'Sitting changed', body: 'A clinic changed one of your sittings.', data: { clinicId: id } });
     this.realtime.emitClinic(id, 'roster:changed', { clinicId: id });
-    return updated;
+    return { ...updated, outsideHours: sittingOutsideHours(s.link.clinic.weeklyHours, updated) };
   }
 
   @Delete('clinic/:id/sittings/:sid')
@@ -731,4 +764,4 @@ export class ClinicController {
 }
 
 @Module({ imports: [AuthModule], controllers: [ClinicController], providers: [WebConsoleGuard] })
-export class ClinicModule {}
+export class ClinicModule { }

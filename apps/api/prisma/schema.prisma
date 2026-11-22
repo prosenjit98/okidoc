@@ -281,6 +281,8 @@ model Clinic {
   phone              String?
   about              String?
   openingHours       String?
+  /// Structured opening hours: [{ day: 0-6, open: "HH:mm", close: "HH:mm" | "24:00" }]. openingHours is generated from it.
+  weeklyHours        Json?
   photos             String[] @default([])
   drugLicenceNo      String?
   verification       VerificationStatus @default(PENDING)

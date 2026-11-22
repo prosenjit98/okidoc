@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from '@/lib/nav';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { dayList } from '@okidoc/shared';
+import { Alert, View } from 'react-native';
 import { SittingForm } from '@/components/SittingForm';
 import { Chip, Loading, Screen, T } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -24,7 +25,14 @@ export default function DoctorSitting() {
 
   const save = useAction(
     (v: object) => (id ? api(`/doctor/sittings/${id}`, { method: 'PATCH', body: v }) : api('/doctor/sittings', { body: { ...v, linkId: effLink } })),
-    { invalidate: [['doctor-schedule'], ['doctor-queue']], onSuccess: () => router.back() },
+    {
+      invalidate: [['doctor-schedule'], ['doctor-queue']],
+      onSuccess: (r: { outsideHours?: number[] }) => {
+        // CLN-01a: saved; the clinic is told too.
+        if (r?.outsideHours?.length) Alert.alert('Outside clinic hours', `Saved. On ${dayList(r.outsideHours)} the clinic is closed at this time — please check with the clinic.`);
+        router.back();
+      },
+    },
   );
   const remove = useAction(() => api(`/doctor/sittings/${id}`, { method: 'DELETE' }), { invalidate: [['doctor-schedule']], onSuccess: () => router.back() });
 
@@ -54,8 +62,8 @@ export default function DoctorSitting() {
               onDelete={
                 id
                   ? async () => {
-                      if (await confirm('Remove sitting', 'Future bookings stay valid; no new bookings will be taken.', 'Remove', true)) remove.mutate();
-                    }
+                    if (await confirm('Remove sitting', 'Future bookings stay valid; no new bookings will be taken.', 'Remove', true)) remove.mutate();
+                  }
                   : undefined
               }
             />

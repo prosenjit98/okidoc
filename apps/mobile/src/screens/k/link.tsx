@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { dayList } from '@okidoc/shared';
+import { Alert, View } from 'react-native';
 import { SittingForm, type SittingValues } from '@/components/SittingForm';
 import { Avatar, Button, Card, Chip, Input, Loading, Row, Screen, Section, Sheet, T } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -31,7 +32,14 @@ export default function LinkDetail() {
   const saveLink = useAction(() => api(`/clinic/${clinicId}/links/${linkId}`, { method: 'PATCH', body: { consultationFee: Math.round(Number(fee) * 100), clinicSplitPercent: Number(split), walkInEvery } }), inv);
   const saveSitting = useAction(
     (v: SittingValues) => (edit?.id ? api(`/clinic/${clinicId}/sittings/${edit.id}`, { method: 'PATCH', body: v }) : api(`/clinic/${clinicId}/links/${linkId}/sittings`, { body: v })),
-    { ...inv, onSuccess: () => setEdit(null) },
+    {
+      ...inv,
+      onSuccess: (r: { outsideHours?: number[] }) => {
+        setEdit(null);
+        // CLN-01a: saved, but flag days outside the clinic's opening hours.
+        if (r?.outsideHours?.length) Alert.alert('Outside your opening hours', `Saved. On ${dayList(r.outsideHours)} this sitting is outside your clinic's opening hours — update the hours in Clinic profile if the clinic opens for it.`);
+      },
+    },
   );
   const removeSitting = useAction((id: string) => api(`/clinic/${clinicId}/sittings/${id}`, { method: 'DELETE' }), { ...inv, onSuccess: () => setEdit(null) });
   const removeDoctor = useAction(() => api(`/clinic/${clinicId}/links/${linkId}`, { method: 'DELETE' }), { ...inv, onSuccess: () => router.back() });
@@ -91,8 +99,8 @@ export default function LinkDetail() {
             onDelete={
               edit.id
                 ? async () => {
-                    if (await confirm('Remove sitting', 'No new bookings will be taken for it.', 'Remove', true)) removeSitting.mutate(edit.id!);
-                  }
+                  if (await confirm('Remove sitting', 'No new bookings will be taken for it.', 'Remove', true)) removeSitting.mutate(edit.id!);
+                }
                 : undefined
             }
           />

@@ -1,48 +1,68 @@
 'use client';
 
-import { use, useState } from 'react';
-import { Button, Card, ErrorBox, Field, Input, PageHeader, StatusBadge, Table } from '@/components/ui';
-import { download } from '@/lib/api';
-import { inr, todayIST } from '@/lib/format';
-import { useApi } from '@/lib/hooks';
+import { CLINIC_TYPES, CLINIC_TYPE_LABELS } from '@okidoc/shared';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { AreaPicker } from '@/components/area-picker';
+import { DEFAULT_HOURS, HoursEditor, hoursErrors } from '@/components/hours-editor';
+import { Button, Card, Field, Input, Logo, Select, Spinner, Textarea } from '@/components/ui';
+import { api } from '@/lib/api';
+import { useAction, useRequireAuth } from '@/lib/hooks';
 
-const addDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86400_000).toISOString().slice(0, 10);
-
-/** CLN-15 visit register with CSV export. */
-export default function RegisterPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const [from, setFrom] = useState(addDays(todayIST(), -6));
-  const [to, setTo] = useState(todayIST());
-  const [q, setQ] = useState('');
-  const qs = `from=${from}&to=${to}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
-  const { data, error } = useApi<any>(['clinic', id, 'register', qs], `/clinic/${id}/register?${qs}`);
+/** CLN-01 clinic registration. */
+export default function RegisterClinic() {
+  const session = useRequireAuth();
+  const router = useRouter();
+  const [f, setF] = useState({ name: '', type: 'PHARMACY_CHAMBER', addressLine: '', areaId: '', pin: '', phone: '', about: '', drugLicenceNo: '', weeklyHours: DEFAULT_HOURS });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setF({ ...f, [k]: e.target.value });
+  };
+  const reg = useAction(
+    () => api<any>('/clinics/register', { body: { ...f, phone: f.phone || undefined, drugLicenceNo: f.drugLicenceNo || null, about: f.about || undefined } }),
+    { success: 'Clinic registered — Okidoc will verify it shortly' },
+  );
+  if (!session) return <Spinner />;
   return (
-    <>
-      <PageHeader title="Visit register" subtitle="Every token by doctor and sitting." actions={<Button tone="outline" onClick={() => download(`/clinic/${id}/register?${qs}&format=csv`, `okidoc-register-${from}-${to}.csv`)}>Export CSV</Button>} />
-      <Card>
-        <div className="mb-4 flex flex-wrap gap-3">
-          <Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
-          <Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
-          <Field label="Patient name or phone"><Input value={q} onChange={(e) => setQ(e.target.value)} /></Field>
+    <div className="ok-main min-h-screen">
+      <div className="ok-aurora relative overflow-hidden px-6 pb-28 pt-6 text-white">
+        <div className="ok-dots pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto max-w-2xl">
+          <Logo light />
+          <p className="mt-10 text-[11px] font-bold uppercase tracking-[0.2em] text-teal-200">Step 3 of 3 · Your clinic</p>
+          <h1 className="mt-2 text-[32px] font-extrabold tracking-tight">Start your clinic on Okidoc</h1>
+          <p className="mt-2 text-sm text-teal-50/70">Patients find you after Okidoc verifies your clinic. You can add doctors right away.</p>
         </div>
-        {error ? <ErrorBox error={error} /> : (
-          <Table
-            rows={data?.items}
-            empty="No visits in this period."
-            cols={[
-              { h: 'Date', c: (r: any) => r.date },
-              { h: 'Sitting', c: (r: any) => r.sitting },
-              { h: 'Doctor', c: (r: any) => `Dr. ${r.doctor}` },
-              { h: 'Token', c: (r: any) => `#${r.token}` },
-              { h: 'Patient', c: (r: any) => (<div>{r.patient}<div className="text-xs text-slate-500">{r.phone}</div></div>) },
-              { h: 'Source', c: (r: any) => r.source.toLowerCase().replace('_', '-') },
-              { h: 'Status', c: (r: any) => <StatusBadge status={r.status} /> },
-              { h: 'Fee', c: (r: any) => inr(r.fee) },
-              { h: 'Paid', c: (r: any) => r.paid.toLowerCase().replace('_', ' ') || '—' },
-            ]}
-          />
-        )}
-      </Card>
-    </>
+      </div>
+      <div className="relative mx-auto -mt-16 max-w-2xl px-6 pb-16">
+        <Card>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Clinic / pharmacy name"><Input value={f.name} onChange={set('name')} /></Field>
+            <Field label="Type">
+              <Select value={f.type} onChange={set('type')}>
+                {CLINIC_TYPES.map((t) => <option key={t} value={t}>{CLINIC_TYPE_LABELS[t]}</option>)}
+              </Select>
+            </Field>
+            <div className="md:col-span-2"><Field label="Address"><Input value={f.addressLine} onChange={set('addressLine')} /></Field></div>
+            <AreaPicker areaId={f.areaId || undefined} pin={f.pin} onPick={(a) => setF((cur) => ({ ...cur, areaId: a.id, pin: a.pin }))} />
+            <Field label="PIN code"><Input value={f.pin} maxLength={6} onChange={set('pin')} /></Field>
+            <Field label="Clinic phone"><Input value={f.phone} onChange={set('phone')} /></Field>
+            {f.type === 'PHARMACY_CHAMBER' && <Field label="Drug licence number"><Input value={f.drugLicenceNo} onChange={set('drugLicenceNo')} /></Field>}
+            <div className="md:col-span-2">
+              <p className="mb-1.5 text-sm font-semibold text-slate-700">Opening hours</p>
+              <HoursEditor value={f.weeklyHours} onChange={(weeklyHours) => setF((cur) => ({ ...cur, weeklyHours }))} />
+            </div>
+            <div className="md:col-span-2"><Field label="About (shown to patients)"><Textarea rows={3} value={f.about} onChange={set('about')} /></Field></div>
+          </div>
+          <Button
+            className="mt-6 w-full py-3"
+            loading={reg.isPending}
+            disabled={!f.name || !f.addressLine || !f.areaId || f.pin.length !== 6 || hoursErrors(f.weeklyHours).length > 0}
+            onClick={() => reg.mutate(undefined, { onSuccess: (c) => router.replace(`/console/${c.id}/queue`) })}
+          >
+            Register clinic
+          </Button>
+        </Card>
+      </div>
+    </div>
   );
 }

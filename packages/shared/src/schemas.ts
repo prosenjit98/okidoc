@@ -5,11 +5,13 @@ import {
   AD_PLACEMENTS,
   CLINIC_TYPES,
   FEATURE_KEYS,
+  INDIAN_STATES,
   LANGUAGES,
   LIMIT_KEYS,
   NOTIFICATION_TYPES,
   SIGNUP_ROLES,
 } from './constants';
+import { hoursProblems } from './hours';
 import { normalizeIndianPhone } from './rules';
 
 export const phoneSchema = z
@@ -209,6 +211,29 @@ export const freeHoursSchema = z.object({
 });
 
 // ---------------- Clinic ----------------
+/** Clinic opening hours: ranges per weekday (no range = closed). `close` may be 24:00 (till midnight). */
+export const weeklyHoursSchema = z
+  .array(
+    z.object({
+      day: z.number().int().min(0).max(6),
+      open: hhmm,
+      close: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/, 'Use HH:mm'),
+    }),
+  )
+  .max(21)
+  .superRefine((rows, ctx) => {
+    for (const message of hoursProblems(rows)) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  });
+
+/** A locality a clinic adds when it is not in the area list yet (reused if it already exists). */
+export const newAreaSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  pin: z.string().regex(/^[1-9]\d{5}$/, 'Enter a valid 6-digit PIN code'),
+  district: z.string().trim().min(2).max(60),
+  state: z.enum(INDIAN_STATES),
+});
+export type NewAreaInput = z.infer<typeof newAreaSchema>;
+
 export const clinicSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.enum(CLINIC_TYPES),
@@ -220,6 +245,8 @@ export const clinicSchema = z.object({
   phone: phoneSchema.optional(),
   about: z.string().max(1500).optional(),
   openingHours: z.string().max(200).optional(),
+  /** Structured hours; when set, `openingHours` is generated from it. */
+  weeklyHours: weeklyHoursSchema.optional().nullable(),
   drugLicenceNo: z.string().max(60).optional().nullable(),
   bookingWindowHours: z.number().int().min(1).max(24 * 30).optional().nullable(),
   cutoffMinutes: z.number().int().min(0).max(600).optional(),

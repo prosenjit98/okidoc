@@ -1,5 +1,6 @@
 'use client';
 
+import { dayList } from @okidoc / shared;
 import { useQueryClient } from '@tanstack/react-query';
 import { use, useState } from 'react';
 import { Badge, Button, Card, Confirm, cx, Empty, ErrorBox, Field, Hero, Input, Modal, PageHeader, Select, Spinner, Stats, StatusBadge } from '@/components/ui';
@@ -160,42 +161,47 @@ function SittingModal({ clinicId, linkId, value, onClose }: { clinicId: string; 
       };
       return v.id ? api(`/clinic/${clinicId}/sittings/${v.id}`, { method: 'PATCH', body }) : api(`/clinic/${clinicId}/links/${linkId}/sittings`, { body });
     },
-    { invalidate: [['clinic', clinicId, 'roster']], success: 'Sitting saved — the doctor is notified' },
+    {
+      invalidate: [['clinic', clinicId, 'roster']],
+      // CLN-01a: saved either way, but say so when it falls outside the clinic's opening hours.
+      success: (r: any) => (r?.outsideHours?.length ? Sitting saved.Note: on ${ dayList(r.outsideHours)
+} it is outside your opening hours. : 'Sitting saved — the doctor is notified'),
+    },
   );
-  return (
-    <Modal open onClose={onClose} title={v.id ? 'Edit sitting' : 'Add sitting'}>
-      <Field label="Days">
-        <div className="flex flex-wrap gap-2">
-          {[1, 2, 3, 4, 5, 6, 0].map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setV({ ...v, weekdays: v.weekdays.includes(d) ? v.weekdays.filter((x: number) => x !== d) : [...v.weekdays, d] })}
-              className={cx('rounded-full px-3 py-1.5 text-sm font-semibold', v.weekdays.includes(d) ? 'bg-teal-500 text-white' : 'bg-slate-100 text-slate-600')}
-            >
-              {WEEKDAYS[d]}
-            </button>
-          ))}
-        </div>
+return (
+  <Modal open onClose={onClose} title={v.id ? 'Edit sitting' : 'Add sitting'}>
+    <Field label="Days">
+      <div className="flex flex-wrap gap-2">
+        {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => setV({ ...v, weekdays: v.weekdays.includes(d) ? v.weekdays.filter((x: number) => x !== d) : [...v.weekdays, d] })}
+            className={cx('rounded-full px-3 py-1.5 text-sm font-semibold', v.weekdays.includes(d) ? 'bg-teal-500 text-white' : 'bg-slate-100 text-slate-600')}
+          >
+            {WEEKDAYS[d]}
+          </button>
+        ))}
+      </div>
+    </Field>
+    <div className="mt-3 grid grid-cols-2 gap-3">
+      <Field label="Starts"><Input type="time" value={v.startTime} onChange={(e) => setV({ ...v, startTime: e.target.value })} /></Field>
+      <Field label="Ends"><Input type="time" value={v.endTime} onChange={(e) => setV({ ...v, endTime: e.target.value })} /></Field>
+      <Field label="Repeat">
+        <Select value={v.recurrence} onChange={(e) => setV({ ...v, recurrence: e.target.value })}>
+          <option value="WEEKLY">Every week</option>
+          <option value="ALTERNATE_WEEKS">Alternate weeks</option>
+        </Select>
       </Field>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <Field label="Starts"><Input type="time" value={v.startTime} onChange={(e) => setV({ ...v, startTime: e.target.value })} /></Field>
-        <Field label="Ends"><Input type="time" value={v.endTime} onChange={(e) => setV({ ...v, endTime: e.target.value })} /></Field>
-        <Field label="Repeat">
-          <Select value={v.recurrence} onChange={(e) => setV({ ...v, recurrence: e.target.value })}>
-            <option value="WEEKLY">Every week</option>
-            <option value="ALTERNATE_WEEKS">Alternate weeks</option>
-          </Select>
-        </Field>
-        <Field label="Max patients (optional)"><Input type="number" min={1} value={v.maxPatients} onChange={(e) => setV({ ...v, maxPatients: e.target.value })} /></Field>
-      </div>
-      <div className="mt-4 flex justify-end">
-        <Button disabled={!v.weekdays.length || v.endTime <= v.startTime} loading={save.isPending} onClick={() => save.mutate(undefined, { onSuccess: onClose })}>
-          Save sitting
-        </Button>
-      </div>
-    </Modal>
-  );
+      <Field label="Max patients (optional)"><Input type="number" min={1} value={v.maxPatients} onChange={(e) => setV({ ...v, maxPatients: e.target.value })} /></Field>
+    </div>
+    <div className="mt-4 flex justify-end">
+      <Button disabled={!v.weekdays.length || v.endTime <= v.startTime} loading={save.isPending} onClick={() => save.mutate(undefined, { onSuccess: onClose })}>
+        Save sitting
+      </Button>
+    </div>
+  </Modal>
+);
 }
 
 function AddDoctor({ clinicId, open, onClose }: { clinicId: string; open: boolean; onClose: () => void }) {

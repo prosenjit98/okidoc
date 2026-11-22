@@ -1,4 +1,5 @@
 import { Ionicons } from '@react-native-vector-icons/ionicons/static';
+import { openStatus, type HoursRange } from '@okidoc/shared';
 import { router } from '@/lib/nav';
 import { Image, Pressable, Text, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -148,6 +149,8 @@ export interface ClinicCardData {
   doctorsToday?: number;
   ratingAvg?: number | null;
   ratingCount?: number;
+  /** CLN-01a: shows "Open now" / "Closed · opens …". */
+  weeklyHours?: HoursRange[] | null;
 }
 
 export function ClinicRow({ c, onPress, statusText, statusTone }: { c: ClinicCardData; onPress?: () => void; statusText?: string; statusTone?: 'ok' | 'info' }) {
@@ -177,11 +180,24 @@ export function ClinicRow({ c, onPress, statusText, statusTone }: { c: ClinicCar
             {lang === 'bn' && c.area?.nameBn ? c.area.nameBn : c.area?.name}
             {c.area?.region ? ` · ${c.area.region.district}` : ''}
           </T>
+          <OpenLine hours={c.weeklyHours} />
           {!!statusText && <Text style={{ color: statusTone === 'ok' ? C.ok : C.tealDark, fontWeight: '700', fontSize: 12, marginTop: 4 }}>{statusText}</Text>}
         </View>
         <Ionicons name="chevron-forward" size={18} color={C.faint} />
       </Row>
     </Card>
+  );
+}
+
+/** "● Open now · closes 10 PM" (green) or "Closed · opens Fri 7 AM" (grey); nothing when the clinic has no hours set. */
+export function OpenLine({ hours, size = 12 }: { hours?: HoursRange[] | null; size?: number }) {
+  const st = openStatus(hours);
+  if (!st) return null;
+  return (
+    <Text style={{ color: st.open ? C.ok : C.muted, fontWeight: '700', fontSize: size, marginTop: 3 }} accessibilityLabel={st.text}>
+      {st.open ? '● ' : ''}
+      {st.text}
+    </Text>
   );
 }
 

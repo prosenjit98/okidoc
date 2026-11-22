@@ -1,8 +1,8 @@
 import { Ionicons } from '@react-native-vector-icons/ionicons/static';
-import { CLINIC_TYPE_LABELS, type ClinicType } from '@okidoc/shared';
+import { CLINIC_TYPE_LABELS, weeklyHoursLines, type ClinicType, type HoursRange } from '@okidoc/shared';
 import { router, useLocalSearchParams } from '@/lib/nav';
 import { Image, Linking, ScrollView, Text, View } from 'react-native';
-import { DoctorRow, type DoctorCardData } from '@/components/common';
+import { DoctorRow, OpenLine, type DoctorCardData } from '@/components/common';
 import { RatingLine, ReviewList } from '@/components/rating';
 import { Badge, Button, Card, ErrorView, Loading, Row, Screen, Section, T } from '@/components/ui';
 import { inr } from '@/lib/format';
@@ -20,6 +20,7 @@ interface ClinicDetail {
   about?: string | null;
   phone?: string | null;
   openingHours?: string | null;
+  weeklyHours?: HoursRange[] | null;
   pin: string;
   lat?: number | null;
   lng?: number | null;
@@ -65,11 +66,34 @@ export default function ClinicPage() {
             </View>
             <T style={{ marginTop: 8 }}>{c.addressLine}</T>
             <T variant="muted">PIN {c.pin}</T>
-            {!!c.openingHours && (
-              <Row style={{ marginTop: 8 }}>
-                <Ionicons name="time-outline" size={16} color={C.muted} />
-                <T variant="muted">{c.openingHours}</T>
-              </Row>
+            {c.weeklyHours?.length ? (
+              // CLN-01a: open now + the week, days with the same hours grouped.
+              <View style={{ marginTop: 10, padding: 12, borderRadius: 14, backgroundColor: '#F6FAFB' }}>
+                <Row>
+                  <Ionicons name="time-outline" size={16} color={C.muted} />
+                  <T variant="label">Opening hours</T>
+                </Row>
+                <OpenLine hours={c.weeklyHours} size={13} />
+                <View style={{ marginTop: 6 }}>
+                  {weeklyHoursLines(c.weeklyHours).map((l) => (
+                    <Row key={l.days} style={{ justifyContent: 'space-between', paddingVertical: 2 }}>
+                      <T variant="small" style={{ fontWeight: '700' }}>
+                        {l.days}
+                      </T>
+                      <T variant="small" style={{ color: l.hours === 'Closed' ? C.muted : C.text, flexShrink: 1, textAlign: 'right', marginLeft: 12 }}>
+                        {l.hours}
+                      </T>
+                    </Row>
+                  ))}
+                </View>
+              </View>
+            ) : (
+              !!c.openingHours && (
+                <Row style={{ marginTop: 8 }}>
+                  <Ionicons name="time-outline" size={16} color={C.muted} />
+                  <T variant="muted">{c.openingHours}</T>
+                </Row>
+              )
             )}
             {!!c.about && <T style={{ marginTop: 8 }}>{c.about}</T>}
             <Row style={{ marginTop: 12 }}>

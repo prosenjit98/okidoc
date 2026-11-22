@@ -37,6 +37,8 @@ const clinicCardSelect = {
   lng: true,
   ratingAvg: true,
   ratingCount: true,
+  // CLN-01a: structured clinic opening hours
+  weeklyHours: true,
   area: { select: { id: true, name: true, nameBn: true, region: { select: { district: true } } } },
 } satisfies Prisma.ClinicSelect;
 
@@ -53,7 +55,7 @@ export class CatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scheduling: SchedulingService,
-  ) {}
+  ) { }
 
   private visibleClinic = { verification: 'APPROVED' as const, active: true };
   private visibleDoctor = { verification: 'APPROVED' as const };
@@ -100,17 +102,17 @@ export class CatalogService {
     const rows = instances.length
       ? instances
       : await this.prisma.sittingInstance.findMany({
-          where: {
-            date: today,
-            status: { in: ['SCHEDULED', 'ONLINE', 'PAUSED'] },
-            sitting: { link: { status: 'APPROVED', clinic: { ...this.visibleClinic, ...scope }, ...specFilter } },
-          },
-          include: {
-            sitting: { include: { link: { include: { clinic: { select: clinicCardSelect }, doctor: { include: doctorCardInclude } } } } },
-            _count: { select: { bookings: { where: { status: { in: ['BOOKED', 'PRESENT', 'LATE', 'SKIPPED'] } } } } },
-          },
-          orderBy: { startTime: 'asc' },
-        });
+        where: {
+          date: today,
+          status: { in: ['SCHEDULED', 'ONLINE', 'PAUSED'] },
+          sitting: { link: { status: 'APPROVED', clinic: { ...this.visibleClinic, ...scope }, ...specFilter } },
+        },
+        include: {
+          sitting: { include: { link: { include: { clinic: { select: clinicCardSelect }, doctor: { include: doctorCardInclude } } } } },
+          _count: { select: { bookings: { where: { status: { in: ['BOOKED', 'PRESENT', 'LATE', 'SKIPPED'] } } } } },
+        },
+        orderBy: { startTime: 'asc' },
+      });
     const card = (i: (typeof rows)[number]) => ({
       instanceId: i.id,
       sittingId: i.sittingId,
@@ -255,13 +257,21 @@ export class CatalogController {
     private readonly catalog: CatalogService,
     private readonly prisma: PrismaService,
     private readonly scheduling: SchedulingService,
-  ) {}
+  ) { }
 
   @Get('areas')
-  areas(@Query('q') q?: string, @Query('regionId') regionId?: string) {
+  @Get('areas')
+  areas(@Query('q') q?: string, @Query('regionId') regionId?: string, @Query('id') id?: string) {
+    q = q?.trim();
     const ci = q ? { contains: q, mode: 'insensitive' as const } : undefined;
     return this.prisma.area.findMany({
-      where: { active: true, ...(regionId ? { regionId } : {}), ...(ci ? { OR: [{ name: ci }, { nameBn: ci }, { pin: { startsWith: q } }, { region: { district: ci } }] } : {}) },
+      where: {
+        active: true,
+        // id = look up one area directly (a saved choice may be beyond the first 200 rows).
+        ...(id ? { id } : {}),
+        ...(regionId ? { regionId } : {}),
+        ...(ci ? { OR: [{ name: ci }, { nameBn: ci }, { pin: { startsWith: q } }, { region: { district: ci } }, { region: { state: ci } }] } : {}),
+      },
       include: { region: true },
       orderBy: [{ region: { district: 'asc' } }, { name: 'asc' }],
       take: 200,
@@ -325,4 +335,4 @@ export class CatalogController {
 }
 
 @Module({ controllers: [CatalogController], providers: [CatalogService], exports: [CatalogService] })
-export class CatalogModule {}
+export class CatalogModule { }

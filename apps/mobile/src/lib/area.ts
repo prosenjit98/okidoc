@@ -20,8 +20,8 @@ export function useArea() {
     queryFn: async () => {
       const id = (await prefs.get<string | null>('areaId', null)) ?? user?.areaId ?? null;
       if (!id) return null;
-      const all = await api<AreaRow[]>('/areas', { auth: false });
-      return all.find((a) => a.id === id) ?? null;
+      const found = await api<AreaRow[]>(/areas?id=${encodeURIComponent(id)}, { auth: false });
+      return found[0] ?? null;
     },
     staleTime: Infinity,
   });

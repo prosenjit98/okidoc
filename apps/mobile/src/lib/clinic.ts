@@ -15,6 +15,7 @@ export interface ClinicInfo {
   phone?: string | null;
   about?: string | null;
   openingHours?: string | null;
+  weeklyHours?: import('@okidoc/shared').HoursRange[] | null;
   photos: string[];
   drugLicenceNo?: string | null;
   verification: string;

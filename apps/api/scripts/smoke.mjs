@@ -271,7 +271,8 @@ async function main() {
 
   // ---------------------------------------------------------------- ratings
   console.log('\nRatings: doctor and clinic (PAT-16, ADM-13)');
-  const rs = otherSlots[0];
+  // A sitting that has not started yet, so no earlier patient is already being seen.
+  const rs = otherSlots.find((x) => x.status === 'SCHEDULED') ?? otherSlots[0];
   if (!rs) check('a bookable slot at OK-SHYP4 for the rating test', false);
   else {
     const kt = await staffLogin('9000000102', 'Clinic@1234');
@@ -394,6 +395,66 @@ async function main() {
       check('late patient not marked no-show at end', !v.bookings.some((b) => b.id === w4.id), v.bookings.map((b) => `${b.tokenNo}:${b.status}`));
       must(await api('PATCH', `/clinic/${oc.id}`, { lateRejoinAfter: 2 }, kt), 'restore clinic rule');
     }
+  }
+
+
+  // ---------------------------------------------------------------- clinic-added areas · CLN-01a opening hours
+  console.log('\nClinic areas & opening hours');
+  {
+    const ht = await staffLogin('9000000101', 'Clinic@1234');
+    const hc = must(await api('GET', '/clinics/by-code/OK-SNJV1'), 'clinic for hours');
+    const before = must(await api('GET', /clinic/${hc.id}, null, ht), 'clinic before hours');
+
+    // A clinic outside the listed areas adds its own (anywhere in India); repeats reuse it.
+    const a1 = must(await api('POST', '/areas', { name: 'smoke nagar', pin: '600001', district: 'Chennai', state: 'Tamil Nadu' }, ht), 'clinic adds an area outside West Bengal');
+    check('area name tidied and placed in its district', a1.name === 'Smoke Nagar' && a1.pin === '600001' && a1.region.district === 'Chennai' && a1.region.state === 'Tamil Nadu', a1);
+    const a2 = must(await api('POST', '/areas', { name: 'SMOKE  NAGAR ', pin: '600001', district: 'chennai', state: 'Tamil Nadu' }, ht), 'same area typed differently');
+    check('existing area reused, not duplicated', a2.id === a1.id, { a1: a1.id, a2: a2.id });
+    const badPin = await api('POST', '/areas', { name: 'Smoke Nagar', pin: '012345', district: 'Chennai', state: 'Tamil Nadu' }, ht);
+    check('invalid PIN code rejected', badPin.status === 400, badPin.body);
+    const badState = await api('POST', '/areas', { name: 'Smoke Nagar', pin: '600001', district: 'Chennai', state: 'Madras' }, ht);
+    check('unknown state rejected', badState.status === 400, badState.body);
+    const pt = await newPatient('Area Tester');
+    const byPatient = await api('POST', '/areas', { name: 'Patient Nagar', pin: '600002', district: 'Chennai', state: 'Tamil Nadu' }, pt);
+    check('patients cannot add areas', byPatient.status === 403, byPatient.status);
+    const byState = must(await api('GET', '/areas?q=Tamil'), 'search areas by state');
+    check('area search matches the state name', byState.some((a) => a.id === a1.id));
+    const byId = must(await api('GET', /areas?id=${a1.id}), 'area by id');
+    check('area looked up by id', byId.length === 1 && byId[0].id === a1.id);
+
+    // Opening hours: Mon–Wed 10–22, Thu closed, Fri–Sat 7–9, Sun 7–13.
+    const H = [...[1, 2, 3].map((day) => ({ day, open: '10:00', close: '22:00' })), ...[5, 6].map((day) => ({ day, open: '07:00', close: '09:00' })), { day: 0, open: '07:00', close: '13:00' }];
+    const saved = must(await api('PATCH', /clinic/${hc.id}, { weeklyHours: H }, ht), 'save weekly opening hours');
+    check('opening-hours text generated from the week', saved.openingHours === 'Mon–Wed 10 AM – 10 PM · Thu Closed · Fri–Sat 7 AM – 9 AM · Sun 7 AM – 1 PM', saved.openingHours);
+    const overlap = await api('PATCH', /clinic/${hc.id}, { weeklyHours: [{ day: 1, open: '10:00', close: '13:00' }, { day: 1, open: '12:00', close: '14:00' }] }, ht);
+    check('overlapping hours rejected', overlap.status === 400, overlap.body);
+    const backwards = await api('PATCH', /clinic/${hc.id}, { weeklyHours: [{ day: 1, open: '22:00', close: '10:00' }] }, ht);
+    check('closing before opening rejected', backwards.status === 400, backwards.body);
+    const pub = must(await api('GET', /clinics/${hc.id}), 'public clinic page');
+    check('patients get the weekly hours', Array.isArray(pub.weeklyHours) && pub.weeklyHours.length === 6, pub.weeklyHours);
+    const list = must(await api('GET', '/clinics'), 'clinic list');
+    check('clinic cards carry the hours for "Open now"', list.some((c) => c.id === hc.id && Array.isArray(c.weeklyHours)), list.map((c) => c.id));
+
+    // Sittings outside the hours are saved with a warning (clinic- and doctor-added).
+    const roster = must(await api('GET', /clinic/${hc.id}/doctors, null, ht), 'roster for hours');
+    const own = roster.doctors.find((d) => d.doctor.name === 'Ananya Ghosh');
+    const lk = own ?? roster.doctors[0];
+    const far = addDays(istToday(), 300);
+    const s1 = must(await api('POST', /clinic/${hc.id}/links/${lk.linkId}/sittings, { weekdays: [1, 4, 5], startTime: '17:00', endTime: '20:00', validFrom: far }, ht), 'clinic adds a sitting outside hours');
+    check('sitting outside hours flagged (Thu closed, Fri only 7–9 AM)', JSON.stringify(s1.outsideHours) === '[4,5]', s1.outsideHours);
+    const s1e = must(await api('PATCH', /clinic/${hc.id}/sittings/${s1.id}, { weekdays: [1, 2], startTime: '11:00', endTime: '13:00' }, ht), 'move sitting inside hours');
+    check('sitting inside hours has no warning', Array.isArray(s1e.outsideHours) && s1e.outsideHours.length === 0, s1e.outsideHours);
+    must(await api('DELETE', /clinic/${hc.id}/sittings/${s1.id}, null, ht), 'clean up clinic sitting');
+    if (own) {
+      const dt2 = await staffLogin('9000000201', 'Doctor@1234');
+      const s2 = must(await api('POST', '/doctor/sittings', { linkId: own.linkId, weekdays: [4], startTime: '18:00', endTime: '19:00', validFrom: far }, dt2), 'doctor adds a sitting on a closed day');
+      check('doctor warned that the clinic is closed then', JSON.stringify(s2.outsideHours) === '[4]', s2.outsideHours);
+      must(await api('DELETE', /doctor/sittings/${s2.id}, null, dt2), 'clean up doctor sitting');
+    }
+
+    // Clearing the structured hours keeps the text the clinic sends.
+    const restored = must(await api('PATCH', /clinic/${hc.id}, { weeklyHours: null, openingHours: before.openingHours ?? undefined }, ht), 'restore clinic hours');
+    check('structured hours cleared, text kept', restored.weeklyHours === null && restored.openingHours === before.openingHours, { w: restored.weeklyHours, t: restored.openingHours });
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

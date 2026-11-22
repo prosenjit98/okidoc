@@ -1,8 +1,8 @@
-import { CLINIC_TYPE_LABELS, CLINIC_TYPES, type ClinicType } from '@okidoc/shared';
+import { CLINIC_TYPE_LABELS, CLINIC_TYPES, type ClinicType, type HoursRange } from '@okidoc/shared';
 import { useState } from 'react';
-import { ScrollView, View } from 'react-native';
-import { useApi } from '@/lib/hooks';
-import type { AreaRow } from '@/lib/area';
+import { View } from 'react-native';
+import { AreaPicker } from './AreaPicker';
+import { cleanHours, DEFAULT_HOURS, HoursEditor, hoursErrors } from './HoursEditor';
 import { Button, Chip, Input, T } from './ui';
 
 export interface ClinicFormValues {
@@ -14,17 +14,17 @@ export interface ClinicFormValues {
   phone?: string;
   about?: string;
   openingHours?: string;
+  /** CLN-01a structured hours; null = the clinic still uses the old free-text hours. */
+  weeklyHours?: HoursRange[] | null;
   drugLicenceNo?: string | null;
 }
 
 /** Clinic profile form (CLN-01 / CLN-18). */
 export function ClinicForm({ initial, onSubmit, saving, submitLabel }: { initial?: Partial<ClinicFormValues>; onSubmit: (v: ClinicFormValues) => void; saving?: boolean; submitLabel: string }) {
-  const [v, setV] = useState<Partial<ClinicFormValues>>({ type: 'PHARMACY_CHAMBER', ...initial });
-  const [areaQ, setAreaQ] = useState('');
-  const areas = useApi<AreaRow[]>(['areas', areaQ], `/areas${areaQ ? `?q=${encodeURIComponent(areaQ)}` : ''}`);
+  // New clinics start with Mon–Sat 9–9; existing clinics without structured hours keep their text until they switch.
+  const [v, setV] = useState<Partial<ClinicFormValues>>({ type: 'PHARMACY_CHAMBER', ...initial, weeklyHours: initial ? (initial.weeklyHours ?? null) : DEFAULT_HOURS });
   const set = (k: keyof ClinicFormValues) => (x: string) => setV({ ...v, [k]: x });
-  const selectedArea = areas.data?.find((a) => a.id === v.areaId);
-  const valid = !!v.name && v.name.length > 1 && !!v.type && !!v.addressLine && v.addressLine.length > 2 && !!v.areaId && /^\d{6}$/.test(v.pin ?? '');
+  const valid = !!v.name && v.name.length > 1 && !!v.type && !!v.addressLine && v.addressLine.length > 2 && !!v.areaId && /^\d{6}$/.test(v.pin ?? '') && !(v.weeklyHours && hoursErrors(v.weeklyHours).length);
   return (
     <View>
       <Input label="Clinic / pharmacy name" value={v.name ?? ''} onChangeText={set('name')} />
@@ -37,15 +37,24 @@ export function ClinicForm({ initial, onSubmit, saving, submitLabel }: { initial
         ))}
       </View>
       <Input label="Address" value={v.addressLine ?? ''} onChangeText={set('addressLine')} multiline />
-      <Input label="Area" value={areaQ} onChangeText={setAreaQ} placeholder={selectedArea ? `${selectedArea.name} (${selectedArea.region.district})` : 'Search area or PIN'} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: -6, marginBottom: 10 }}>
-        {areas.data?.slice(0, 20).map((a) => (
-          <Chip key={a.id} label={`${a.name} · ${a.pin}`} active={v.areaId === a.id} onPress={() => setV({ ...v, areaId: a.id, pin: v.pin || a.pin })} />
-        ))}
-      </ScrollView>
+      <AreaPicker areaId={v.areaId} pin={v.pin} onPick={(a) => setV((cur) => ({ ...cur, areaId: a.id, pin: a.pin }))} />
       <Input label="PIN code" value={v.pin ?? ''} onChangeText={(x) => set('pin')(x.replace(/\D/g, '').slice(0, 6))} keyboardType="number-pad" />
       <Input label="Clinic phone" value={v.phone ?? ''} onChangeText={set('phone')} keyboardType="phone-pad" />
-      <Input label="Opening hours" value={v.openingHours ?? ''} onChangeText={set('openingHours')} placeholder="Mon–Sat 9 AM – 9 PM" />
+      {v.weeklyHours ? (
+        <HoursEditor value={v.weeklyHours} onChange={(weeklyHours) => setV((cur) => ({ ...cur, weeklyHours }))} />
+      ) : (
+        <View style={{ marginBottom: 14 }}>
+          <Input
+            label="Opening hours"
+            value={v.openingHours ?? ''}
+            onChangeText={set('openingHours')}
+            placeholder="Mon–Sat 9 AM – 9 PM"
+            hint="Set day-by-day hours so patients see “Open now”."
+            style={{ marginBottom: 0 }}
+          />
+          <Button title="Set day-by-day hours" tone="soft" small icon="time-outline" onPress={() => setV((cur) => ({ ...cur, weeklyHours: DEFAULT_HOURS }))} />
+        </View>
+      )}
       <Input label="About" value={v.about ?? ''} onChangeText={set('about')} multiline />
       {v.type === 'PHARMACY_CHAMBER' && <Input label="Drug licence number" value={v.drugLicenceNo ?? ''} onChangeText={set('drugLicenceNo')} />}
       <Button
@@ -61,7 +70,7 @@ export function ClinicForm({ initial, onSubmit, saving, submitLabel }: { initial
             pin: v.pin!,
             phone: v.phone?.replace(/\D/g, '').slice(-10) || undefined,
             about: v.about || undefined,
-            openingHours: v.openingHours || undefined,
+            ...(v.weeklyHours ? { weeklyHours: cleanHours(v.weeklyHours) } : { openingHours: v.openingHours || undefined }),
             drugLicenceNo: v.drugLicenceNo || null,
           })
         }
