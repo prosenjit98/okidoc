@@ -35,6 +35,7 @@ import {
   sittingSchema,
   staffSchema,
   walkInSchema,
+  tidyPlace,
 } from '@okidoc/shared';
 import { randomInt } from 'node:crypto';
 import type { Response } from 'express';
@@ -43,6 +44,7 @@ import { z } from 'zod';
 import { AuthUser, CurrentUser, isAdmin, loadAuthUser, Roles, verifyAccessToken } from '../../common/auth';
 import { AppError, bad, conflict, forbidden, must, Zod } from '../../common/http';
 import { PrismaService } from '../../common/prisma.service';
+import { findRegion, findSameArea, regionFor } from '../../common/areas';
 import { clinicHoursData, sittingOutsideHours } from '../../common/hours';
 import { AuditService } from '../../common/settings.service';
 import { config } from '../../config';
@@ -66,7 +68,7 @@ export class WebConsoleGuard implements CanActivate {
   constructor(
     private readonly entitlements: EntitlementsService,
     private readonly prisma: PrismaService,
-  ) { }
+  ) {}
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
     const clinicId = req.params?.id;
@@ -82,11 +84,6 @@ export class WebConsoleGuard implements CanActivate {
 }
 
 /** "  salt   lake " → "Salt Lake"; mixed-case input ("DumDum Road") is kept as typed. */
-const tidyPlace = (s: string) => {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t === t.toLowerCase() || t === t.toUpperCase() ? t.toLowerCase().replace(/(^|[\s(-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()) : t;
-};
-
 const genCode = () => {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return 'OK-' + Array.from({ length: 5 }, () => a[randomInt(0, a.length)]).join('');
@@ -110,7 +107,7 @@ export class ClinicController {
     private readonly storage: StorageService,
     private readonly audit: AuditService,
     private readonly auth: AuthService,
-  ) { }
+  ) {}
 
   // ================================================================== registration & profile
 
@@ -137,14 +134,14 @@ export class ClinicController {
   async addArea(@CurrentUser() u: AuthUser, @Body(new Zod(newAreaSchema)) dto: z.infer<typeof newAreaSchema>) {
     const name = tidyPlace(dto.name);
     const district = tidyPlace(dto.district);
-    let region = await this.prisma.region.findFirst({ where: { state: dto.state, district: { equals: district, mode: 'insensitive' } } });
-    const existing = region && (await this.prisma.area.findFirst({ where: { regionId: region.id, pin: dto.pin, name: { equals: name, mode: 'insensitive' } }, include: { region: true } }));
+    let region = await findRegion(this.prisma, dto.state, district);
+    const existing = region && (await findSameArea(this.prisma, region.id, dto.pin, name));
     if (existing) return existing;
     const since = new Date(Date.now() - 86_400_000);
     if ((await this.prisma.auditLog.count({ where: { actorId: u.id, action: 'AREA_ADDED', createdAt: { gte: since } } })) >= 5) {
       throw new AppError(429, 'TOO_MANY_AREAS', 'You have added several areas today. Please pick one from the list, or contact Okidoc support.');
     }
-    region ??= await this.prisma.region.create({ data: { state: dto.state, district, name: district } });
+    region ??= await regionFor(this.prisma, dto.state, district);
     const area = await this.prisma.area.create({ data: { regionId: region.id, name, pin: dto.pin }, include: { region: true } });
     await this.audit.log(u.id, 'AREA_ADDED', 'Area', area.id, undefined, { name, pin: dto.pin, district, state: dto.state });
     return area;
@@ -257,13 +254,13 @@ export class ClinicController {
         status: { not: 'REMOVED' },
         ...(q
           ? {
-            doctor: {
-              OR: [
-                { user: { name: { contains: q, mode: 'insensitive' } } },
-                { specialties: { some: { name: { contains: q, mode: 'insensitive' } } } },
-              ],
-            },
-          }
+              doctor: {
+                OR: [
+                  { user: { name: { contains: q, mode: 'insensitive' } } },
+                  { specialties: { some: { name: { contains: q, mode: 'insensitive' } } } },
+                ],
+              },
+            }
           : {}),
       },
       include: {
@@ -764,4 +761,4 @@ export class ClinicController {
 }
 
 @Module({ imports: [AuthModule], controllers: [ClinicController], providers: [WebConsoleGuard] })
-export class ClinicModule { }
+export class ClinicModule {}

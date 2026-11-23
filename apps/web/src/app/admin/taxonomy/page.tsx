@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button, Card, Field, Input, PageHeader, Table, Tabs, Toggle } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAction, useApi } from '@/lib/hooks';
+import { Areas } from './areas';
 
 /** ADM-10 specialties (with patient-friendly / Bengali / Hindi names and symptom keywords) and areas. */
 export default function TaxonomyPage() {
@@ -51,34 +52,6 @@ function Specialties() {
             className: 'w-1/2',
           },
           { h: 'Active', c: (s: any) => <Toggle checked={s.active} onChange={(active) => edit.mutate({ id: s.id, body: { active } })} /> },
-        ]}
-      />
-    </Card>
-  );
-}
-
-function Areas() {
-  const { data } = useApi<any[]>(['areas', 'all'], '/areas');
-  const [f, setF] = useState({ state: 'West Bengal', district: '', name: '', nameBn: '', pin: '' });
-  const add = useAction(() => api('/admin/areas', { body: f }), { invalidate: [['areas', 'all'], ['regions']], success: 'Area added' });
-  const edit = useAction((v: { id: string; body: any }) => api(`/admin/areas/${v.id}`, { method: 'PATCH', body: v.body }), { invalidate: [['areas', 'all']] });
-  return (
-    <Card>
-      <div className="mb-4 grid gap-3 md:grid-cols-6">
-        <Field label="State"><Input value={f.state} onChange={(e) => setF({ ...f, state: e.target.value })} /></Field>
-        <Field label="District"><Input value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })} /></Field>
-        <Field label="Area"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="বাংলা"><Input value={f.nameBn} onChange={(e) => setF({ ...f, nameBn: e.target.value })} /></Field>
-        <Field label="PIN"><Input value={f.pin} maxLength={6} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '') })} /></Field>
-        <div className="flex items-end"><Button disabled={!f.district || !f.name || f.pin.length !== 6} onClick={() => add.mutate(undefined)}>Add</Button></div>
-      </div>
-      <Table
-        rows={data}
-        cols={[
-          { h: 'District', c: (a: any) => `${a.region.district}, ${a.region.state}` },
-          { h: 'Area', c: (a: any) => `${a.name}${a.nameBn ? ` · ${a.nameBn}` : ''}` },
-          { h: 'PIN', c: (a: any) => a.pin },
-          { h: 'Active', c: (a: any) => <Toggle checked={a.active} onChange={(active) => edit.mutate({ id: a.id, body: { active } })} /> },
         ]}
       />
     </Card>

@@ -397,13 +397,12 @@ async function main() {
     }
   }
 
-
   // ---------------------------------------------------------------- clinic-added areas · CLN-01a opening hours
   console.log('\nClinic areas & opening hours');
   {
     const ht = await staffLogin('9000000101', 'Clinic@1234');
     const hc = must(await api('GET', '/clinics/by-code/OK-SNJV1'), 'clinic for hours');
-    const before = must(await api('GET', /clinic/${hc.id}, null, ht), 'clinic before hours');
+    const before = must(await api('GET', `/clinic/${hc.id}`, null, ht), 'clinic before hours');
 
     // A clinic outside the listed areas adds its own (anywhere in India); repeats reuse it.
     const a1 = must(await api('POST', '/areas', { name: 'smoke nagar', pin: '600001', district: 'Chennai', state: 'Tamil Nadu' }, ht), 'clinic adds an area outside West Bengal');
@@ -419,42 +418,109 @@ async function main() {
     check('patients cannot add areas', byPatient.status === 403, byPatient.status);
     const byState = must(await api('GET', '/areas?q=Tamil'), 'search areas by state');
     check('area search matches the state name', byState.some((a) => a.id === a1.id));
-    const byId = must(await api('GET', /areas?id=${a1.id}), 'area by id');
+    const byId = must(await api('GET', `/areas?id=${a1.id}`), 'area by id');
     check('area looked up by id', byId.length === 1 && byId[0].id === a1.id);
 
     // Opening hours: Mon–Wed 10–22, Thu closed, Fri–Sat 7–9, Sun 7–13.
     const H = [...[1, 2, 3].map((day) => ({ day, open: '10:00', close: '22:00' })), ...[5, 6].map((day) => ({ day, open: '07:00', close: '09:00' })), { day: 0, open: '07:00', close: '13:00' }];
-    const saved = must(await api('PATCH', /clinic/${hc.id}, { weeklyHours: H }, ht), 'save weekly opening hours');
+    const saved = must(await api('PATCH', `/clinic/${hc.id}`, { weeklyHours: H }, ht), 'save weekly opening hours');
     check('opening-hours text generated from the week', saved.openingHours === 'Mon–Wed 10 AM – 10 PM · Thu Closed · Fri–Sat 7 AM – 9 AM · Sun 7 AM – 1 PM', saved.openingHours);
-    const overlap = await api('PATCH', /clinic/${hc.id}, { weeklyHours: [{ day: 1, open: '10:00', close: '13:00' }, { day: 1, open: '12:00', close: '14:00' }] }, ht);
+    const overlap = await api('PATCH', `/clinic/${hc.id}`, { weeklyHours: [{ day: 1, open: '10:00', close: '13:00' }, { day: 1, open: '12:00', close: '14:00' }] }, ht);
     check('overlapping hours rejected', overlap.status === 400, overlap.body);
-    const backwards = await api('PATCH', /clinic/${hc.id}, { weeklyHours: [{ day: 1, open: '22:00', close: '10:00' }] }, ht);
+    const backwards = await api('PATCH', `/clinic/${hc.id}`, { weeklyHours: [{ day: 1, open: '22:00', close: '10:00' }] }, ht);
     check('closing before opening rejected', backwards.status === 400, backwards.body);
-    const pub = must(await api('GET', /clinics/${hc.id}), 'public clinic page');
+    const pub = must(await api('GET', `/clinics/${hc.id}`), 'public clinic page');
     check('patients get the weekly hours', Array.isArray(pub.weeklyHours) && pub.weeklyHours.length === 6, pub.weeklyHours);
     const list = must(await api('GET', '/clinics'), 'clinic list');
     check('clinic cards carry the hours for "Open now"', list.some((c) => c.id === hc.id && Array.isArray(c.weeklyHours)), list.map((c) => c.id));
 
     // Sittings outside the hours are saved with a warning (clinic- and doctor-added).
-    const roster = must(await api('GET', /clinic/${hc.id}/doctors, null, ht), 'roster for hours');
+    const roster = must(await api('GET', `/clinic/${hc.id}/doctors`, null, ht), 'roster for hours');
     const own = roster.doctors.find((d) => d.doctor.name === 'Ananya Ghosh');
     const lk = own ?? roster.doctors[0];
     const far = addDays(istToday(), 300);
-    const s1 = must(await api('POST', /clinic/${hc.id}/links/${lk.linkId}/sittings, { weekdays: [1, 4, 5], startTime: '17:00', endTime: '20:00', validFrom: far }, ht), 'clinic adds a sitting outside hours');
+    const s1 = must(await api('POST', `/clinic/${hc.id}/links/${lk.linkId}/sittings`, { weekdays: [1, 4, 5], startTime: '17:00', endTime: '20:00', validFrom: far }, ht), 'clinic adds a sitting outside hours');
     check('sitting outside hours flagged (Thu closed, Fri only 7–9 AM)', JSON.stringify(s1.outsideHours) === '[4,5]', s1.outsideHours);
-    const s1e = must(await api('PATCH', /clinic/${hc.id}/sittings/${s1.id}, { weekdays: [1, 2], startTime: '11:00', endTime: '13:00' }, ht), 'move sitting inside hours');
+    const s1e = must(await api('PATCH', `/clinic/${hc.id}/sittings/${s1.id}`, { weekdays: [1, 2], startTime: '11:00', endTime: '13:00' }, ht), 'move sitting inside hours');
     check('sitting inside hours has no warning', Array.isArray(s1e.outsideHours) && s1e.outsideHours.length === 0, s1e.outsideHours);
-    must(await api('DELETE', /clinic/${hc.id}/sittings/${s1.id}, null, ht), 'clean up clinic sitting');
+    must(await api('DELETE', `/clinic/${hc.id}/sittings/${s1.id}`, null, ht), 'clean up clinic sitting');
     if (own) {
       const dt2 = await staffLogin('9000000201', 'Doctor@1234');
       const s2 = must(await api('POST', '/doctor/sittings', { linkId: own.linkId, weekdays: [4], startTime: '18:00', endTime: '19:00', validFrom: far }, dt2), 'doctor adds a sitting on a closed day');
       check('doctor warned that the clinic is closed then', JSON.stringify(s2.outsideHours) === '[4]', s2.outsideHours);
-      must(await api('DELETE', /doctor/sittings/${s2.id}, null, dt2), 'clean up doctor sitting');
+      must(await api('DELETE', `/doctor/sittings/${s2.id}`, null, dt2), 'clean up doctor sitting');
     }
 
     // Clearing the structured hours keeps the text the clinic sends.
-    const restored = must(await api('PATCH', /clinic/${hc.id}, { weeklyHours: null, openingHours: before.openingHours ?? undefined }, ht), 'restore clinic hours');
+    const restored = must(await api('PATCH', `/clinic/${hc.id}`, { weeklyHours: null, openingHours: before.openingHours ?? undefined }, ht), 'restore clinic hours');
     check('structured hours cleared, text kept', restored.weeklyHours === null && restored.openingHours === before.openingHours, { w: restored.weeklyHours, t: restored.openingHours });
+  }
+
+  // ---------------------------------------------------------------- ADM-10 admin areas: add, edit, CSV bulk
+  console.log('\nAdmin areas (add, edit, CSV bulk)');
+  {
+    const tag = Date.now().toString(36).toUpperCase();
+    const list = must(await api('GET', '/admin/areas?status=all', null, at), 'admin lists areas');
+    check('admin area list has totals and usage counts', typeof list.total === 'number' && list.items.every((a) => a._count && 'clinics' in a._count), list.total);
+
+    const one = must(await api('POST', '/admin/areas', { name: `smoke single ${tag.toLowerCase()}`, pin: '600011', district: 'smoke district', state: 'Tamil Nadu', nameBn: 'স্মোক' }, at), 'admin adds one area');
+    check('admin-added area name tidied', one.name === `Smoke Single ${tag.charAt(0)}${tag.slice(1).toLowerCase()}`, one.name);
+    check('admin-added area keeps Bengali name and district', one.nameBn === 'স্মোক' && one.region.district === 'Smoke District' && one.active === true, one);
+    const dupe = await api('POST', '/admin/areas', { name: one.name.toUpperCase(), pin: '600011', district: 'SMOKE DISTRICT', state: 'Tamil Nadu' }, at);
+    check('same area cannot be added twice', dupe.status === 409 && dupe.body.code === 'AREA_EXISTS', dupe.body);
+
+    const moved = must(await api('PATCH', `/admin/areas/${one.id}`, { name: `Smoke Edited ${tag}`, pin: '600012', district: 'Smoke Second District', lat: 13.08, lng: 80.27 }, at), 'admin edits area');
+    check('edit renames, changes PIN and moves district', moved.name === `Smoke Edited ${tag}` && moved.pin === '600012' && moved.region.district === 'Smoke Second District' && moved.lat === 13.08, moved);
+    const halfLoc = await api('PATCH', `/admin/areas/${one.id}`, { lat: null }, at);
+    check('latitude without longitude rejected', halfLoc.status === 400, halfLoc.body);
+    const two = must(await api('POST', '/admin/areas', { name: `Smoke Other ${tag}`, pin: '600012', district: 'Smoke Second District', state: 'Tamil Nadu' }, at), 'second area');
+    const clash = await api('PATCH', `/admin/areas/${two.id}`, { name: `smoke edited ${tag.toLowerCase()}` }, at);
+    check('edit cannot duplicate another area', clash.status === 409 && clash.body.code === 'AREA_EXISTS', clash.body);
+    const badState = await api('PATCH', `/admin/areas/${two.id}`, { state: 'Madras' }, at);
+    check('edit rejects unknown state', badState.status === 400, badState.body);
+
+    const rows = [
+      { line: 2, area: `SMOKE BULK A ${tag}`, pin: '600013', district: 'smoke district', state: 'tamil nadu' },
+      { line: 3, area: `Smoke Edited ${tag}`, pin: '600012', district: 'SMOKE SECOND DISTRICT', state: 'Tamil Nadu', area_bn: 'নতুন' },
+      { line: 4, area: `Smoke Bad Pin ${tag}`, pin: '012345', district: 'Smoke District', state: 'Tamil Nadu' },
+      { line: 5, area: `Smoke Bad State ${tag}`, pin: '600014', district: 'Smoke District', state: 'Madras' },
+      { line: 6, area: `smoke bulk a ${tag.toLowerCase()}`, pin: '600013', district: 'Smoke District', state: 'Tamil Nadu' },
+      { line: 7, area: `Smoke Half Loc ${tag}`, pin: '600015', district: 'Smoke District', state: 'Tamil Nadu', lat: '13.1' },
+      { line: 8, area: `Smoke Maybe ${tag}`, pin: '600016', district: 'Smoke District', state: 'Tamil Nadu', active: 'maybe' },
+      { line: 9, area: `Smoke Bulk B ${tag}`, pin: '600017', district: `Smoke New District ${tag}`, state: 'Orissa', lat: '20.3', lng: '85.8' },
+    ];
+    const dry = must(await api('POST', '/admin/areas/bulk', { dryRun: true, rows }, at), 'bulk dry run');
+    check('dry run counts new / updated / problems', JSON.stringify(dry.counts) === JSON.stringify({ new: 2, updated: 1, unchanged: 0, error: 5 }), dry.counts);
+    const msg = (line) => dry.rows.find((r) => r.line === line)?.message ?? '';
+    check('dry run explains each problem', /PIN/.test(msg(4)) && /Unknown state/.test(msg(5)) && msg(6) === 'Repeats line 2' && /both latitude/.test(msg(7)) && /yes or no/.test(msg(8)), dry.rows.filter((r) => r.status === 'error'));
+    check('dry run spots the update and the new district', /Bengali name/.test(msg(3)) && /New district/.test(msg(9)) && dry.rows.find((r) => r.line === 9).state === 'Odisha', [msg(3), msg(9)]);
+    const notYet = must(await api('GET', `/admin/areas?q=${encodeURIComponent(`Smoke Bulk A ${tag}`)}`, null, at), 'search after dry run');
+    check('dry run saves nothing', notYet.total === 0, notYet.total);
+
+    const real = must(await api('POST', '/admin/areas/bulk', { dryRun: false, rows }, at), 'bulk import');
+    check('import applies the same result', JSON.stringify(real.counts) === JSON.stringify(dry.counts), real.counts);
+    const found = must(await api('GET', `/areas?q=${encodeURIComponent(tag)}`), 'public search for imported areas');
+    const bulkA = found.find((a) => a.name.toLowerCase() === `smoke bulk a ${tag.toLowerCase()}`);
+    check('imported area is live for clinics and patients, name tidied', !!bulkA && bulkA.name.startsWith('Smoke Bulk A') && bulkA.region.district === 'Smoke District', found.map((a) => a.name));
+    check('imported area in a new district', found.some((a) => a.pin === '600017' && a.region.state === 'Odisha' && a.lat === 20.3));
+    check('existing area updated by the import', found.find((a) => a.id === one.id)?.nameBn === 'নতুন');
+    const again = must(await api('POST', '/admin/areas/bulk', { dryRun: false, rows: rows.slice(0, 2) }, at), 'import the same rows again');
+    check('importing again changes nothing', again.counts.new === 0 && again.counts.unchanged === 2, again.counts);
+
+    const empty = await api('POST', '/admin/areas/bulk', { dryRun: true, rows: [] }, at);
+    check('empty upload rejected', empty.status === 400, empty.status);
+    const byClinic = await api('POST', '/admin/areas/bulk', { dryRun: true, rows }, await staffLogin('9000000101', 'Clinic@1234'));
+    check('clinics cannot bulk upload areas', byClinic.status === 403, byClinic.status);
+
+    // Clean up: switch the smoke areas off (areas are never deleted — clinics and people may point at them).
+    const mine = must(await api('GET', `/admin/areas?q=${encodeURIComponent(tag)}`, null, at), 'smoke areas');
+    const off = must(
+      await api('POST', '/admin/areas/bulk', { dryRun: false, rows: mine.items.map((a, i) => ({ line: i + 2, area: a.name, pin: a.pin, district: a.region.district, state: a.region.state, active: 'no' })) }, at),
+      'deactivate smoke areas',
+    );
+    check('bulk can deactivate areas', off.counts.updated === mine.items.length && mine.items.length === 4, { counts: off.counts, n: mine.items.length });
+    const gone = must(await api('GET', `/areas?q=${encodeURIComponent(tag)}`), 'public search after deactivation');
+    check('inactive areas hidden from pickers', gone.length === 0, gone.length);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

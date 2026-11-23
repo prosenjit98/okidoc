@@ -5,18 +5,24 @@ import {
   adCampaignSchema,
   adPlacementSchema,
   addDays,
+  areaBulkSchema,
+  areaEditSchema,
   areaSchema,
+  type AreaInput,
   bonusCampaignSchema,
   broadcastSchema,
   manualRefundSchema,
   settlementPaidSchema,
   specialtySchema,
   ticketReplySchema,
+  tidyPlace,
   translationSchema,
 } from '@okidoc/shared';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AdminOnly, AuthUser, CurrentUser, Public } from '../../common/auth';
-import { bad, must, Zod } from '../../common/http';
+import { findSameArea, importAreas, regionFor } from '../../common/areas';
+import { bad, conflict, must, Zod } from '../../common/http';
 import { PrismaService } from '../../common/prisma.service';
 import { AuditService } from '../../common/settings.service';
 import { AuthModule } from '../auth/auth.controller';
@@ -280,23 +286,81 @@ export class AdminOpsController {
     return s;
   }
 
+  /** All areas, inactive included, with how many clinics and patients use each. */
+  @AdminOnly('ADMIN_OPS')
+  @Get('areas')
+  async areas(@Query('q') q?: string, @Query('state') state?: string, @Query('status') status = 'all', @Query('skip') skip = '0') {
+    q = q?.trim();
+    const ci = q ? { contains: q, mode: 'insensitive' as const } : undefined;
+    const where: Prisma.AreaWhereInput = {
+      ...(status === 'active' ? { active: true } : status === 'inactive' ? { active: false } : {}),
+      ...(state ? { region: { state } } : {}),
+      ...(ci ? { OR: [{ name: ci }, { nameBn: ci }, { pin: { startsWith: q } }, { region: { district: ci } }] } : {}),
+    };
+    const [total, items] = await Promise.all([
+      this.prisma.area.count({ where }),
+      this.prisma.area.findMany({
+        where,
+        include: { region: true, _count: { select: { clinics: true, users: true } } },
+        orderBy: [{ region: { state: 'asc' } }, { region: { district: 'asc' } }, { name: 'asc' }],
+        skip: Math.max(0, Number(skip) || 0),
+        take: 100,
+      }),
+    ]);
+    return { total, items };
+  }
+
   @AdminOnly('ADMIN_OPS')
   @Post('areas')
-  async addArea(@CurrentUser() u: AuthUser, @Body(new Zod(areaSchema)) dto: z.infer<typeof areaSchema>) {
-    const region = await this.prisma.region.upsert({
-      where: { state_district: { state: dto.state, district: dto.district } },
-      create: { state: dto.state, district: dto.district, name: dto.district },
-      update: {},
+  async addArea(@CurrentUser() u: AuthUser, @Body(new Zod(areaSchema)) dto: AreaInput) {
+    const name = tidyPlace(dto.name);
+    const district = tidyPlace(dto.district);
+    const region = await regionFor(this.prisma, dto.state, district);
+    const same = await findSameArea(this.prisma, region.id, dto.pin, name);
+    if (same) throw conflict('AREA_EXISTS', `${same.name} (${same.pin}) is already listed in ${same.region.district}.`);
+    const a = await this.prisma.area.create({
+      data: { regionId: region.id, name, pin: dto.pin, nameBn: dto.nameBn || null, lat: dto.lat ?? null, lng: dto.lng ?? null, active: dto.active ?? true },
+      include: { region: true },
     });
-    const a = await this.prisma.area.create({ data: { regionId: region.id, name: dto.name, nameBn: dto.nameBn, pin: dto.pin, lat: dto.lat, lng: dto.lng } });
     await this.audit.log(u.id, 'AREA_CREATED', 'Area', a.id, undefined, a);
     return a;
   }
 
+  /** Correct an area: name, Bengali name, PIN, district/state (moves it to that district), map location, active. */
   @AdminOnly('ADMIN_OPS')
   @Patch('areas/:id')
-  async editArea(@Param('id') id: string, @Body(new Zod(z.object({ name: z.string().optional(), nameBn: z.string().optional(), active: z.boolean().optional() }))) dto: any) {
-    return this.prisma.area.update({ where: { id }, data: dto });
+  async editArea(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body(new Zod(areaEditSchema)) dto: z.infer<typeof areaEditSchema>) {
+    const before = must(await this.prisma.area.findUnique({ where: { id }, include: { region: true } }), 'Area');
+    const name = dto.name !== undefined ? tidyPlace(dto.name) : before.name;
+    const pin = dto.pin ?? before.pin;
+    const state = dto.state ?? before.region.state;
+    const district = dto.district !== undefined ? tidyPlace(dto.district) : before.region.district;
+    const moved = state !== before.region.state || district.toLowerCase() !== before.region.district.toLowerCase();
+    const region = moved ? await regionFor(this.prisma, state, district) : before.region;
+    const same = await findSameArea(this.prisma, region.id, pin, name, id);
+    if (same) throw conflict('AREA_EXISTS', `${same.name} (${same.pin}) is already listed in ${same.region.district}. Deactivate one of them instead.`);
+    const lat = dto.lat !== undefined ? dto.lat : before.lat;
+    const lng = dto.lng !== undefined ? dto.lng : before.lng;
+    if ((lat == null) !== (lng == null)) throw bad('LAT_LNG', 'Give both latitude and longitude, or neither');
+    const a = await this.prisma.area.update({
+      where: { id },
+      data: { regionId: region.id, name, pin, lat, lng, ...(dto.nameBn !== undefined ? { nameBn: dto.nameBn || null } : {}), ...(dto.active !== undefined ? { active: dto.active } : {}) },
+      include: { region: true },
+    });
+    await this.audit.log(u.id, 'AREA_UPDATED', 'Area', id, before, a);
+    return a;
+  }
+
+  /** CSV upload (sent as rows, in batches). `dryRun` returns the same report without saving. */
+  @AdminOnly('ADMIN_OPS')
+  @Post('areas/bulk')
+  @HttpCode(200)
+  async bulkAreas(@CurrentUser() u: AuthUser, @Body(new Zod(areaBulkSchema)) dto: z.infer<typeof areaBulkSchema>) {
+    const res = await importAreas(this.prisma, dto.rows, dto.dryRun);
+    if (!dto.dryRun && (res.counts.new || res.counts.updated)) {
+      await this.audit.log(u.id, 'AREAS_IMPORTED', 'Area', undefined, undefined, { ...res.counts, lines: `${dto.rows[0].line}-${dto.rows[dto.rows.length - 1].line}` });
+    }
+    return res;
   }
 
   // ------------------------------------------------------------------ localization (ADM-11)

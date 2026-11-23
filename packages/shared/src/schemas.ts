@@ -421,14 +421,23 @@ export const specialtySchema = z.object({
   keywords: z.array(z.string()).default([]),
   sortOrder: z.number().int().default(0),
 });
-export const areaSchema = z.object({
-  state: z.string().min(2),
-  district: z.string().min(2),
-  name: z.string().min(2),
-  nameBn: z.string().optional(),
-  pin: z.string().regex(/^\d{6}$/),
-  lat: z.number().optional().nullable(),
-  lng: z.number().optional().nullable(),
+/** ADM-10: an area added or edited by an Okidoc admin (one at a time or as a CSV row). */
+export const areaSchema = newAreaSchema.extend({
+  nameBn: z.string().trim().max(60).optional().nullable(),
+  lat: z.number().min(-90).max(90).optional().nullable(),
+  lng: z.number().min(-180).max(180).optional().nullable(),
+  active: z.boolean().optional(),
+});
+export type AreaInput = z.infer<typeof areaSchema>;
+export const areaEditSchema = areaSchema.partial();
+export const AREA_BULK_MAX_ROWS = 2000;
+/** CSV rows as text (validated row by row on the server so one bad row does not reject the file). */
+export const areaBulkSchema = z.object({
+  dryRun: z.boolean(),
+  rows: z
+    .array(z.object({ line: z.number().int().min(1) }).catchall(z.string().max(200)))
+    .min(1)
+    .max(AREA_BULK_MAX_ROWS),
 });
 export const translationSchema = z.object({ language: languageSchema, key: z.string().min(1).max(150), value: z.string().max(2000) });
 export const userAdminActionSchema = z.object({
