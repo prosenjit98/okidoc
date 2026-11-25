@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysOutsideHours, formatHourShort, hoursProblems, openStatus, weeklyHoursLines, weeklyHoursText, type HoursRange } from './hours';
+import { daysOutsideHours, formatHourShort, hoursProblems, openStatus, sittingsFromHours, weeklyHoursLines, weeklyHoursText, type HoursRange } from './hours';
 import { istDateTime } from './rules';
 import { clinicSchema, weeklyHoursSchema } from './schemas';
 
@@ -67,5 +67,28 @@ describe('CLN-01a clinic opening hours', () => {
     expect(weeklyHoursSchema.safeParse(H).success).toBe(true);
     expect(weeklyHoursSchema.safeParse([{ day: 1, open: '10:00', close: '25:00' }]).success).toBe(false);
     expect(clinicSchema.shape.weeklyHours.safeParse(null).success).toBe(true);
+  });
+});
+
+describe('sittingsFromHours (own chamber)', () => {
+  it('groups days with the same hours into one sitting, earliest first', () => {
+    expect(sittingsFromHours(H)).toEqual([
+      { weekdays: [5, 6], startTime: '07:00', endTime: '09:00' },
+      { weekdays: [0], startTime: '07:00', endTime: '13:00' },
+      { weekdays: [1, 2, 3], startTime: '10:00', endTime: '22:00' },
+    ]);
+  });
+  it('splits a day with two ranges and turns midnight into 23:59', () => {
+    const split: HoursRange[] = [
+      { day: 1, open: '07:00', close: '09:00' },
+      { day: 1, open: '17:00', close: '24:00' },
+    ];
+    expect(sittingsFromHours(split)).toEqual([
+      { weekdays: [1], startTime: '07:00', endTime: '09:00' },
+      { weekdays: [1], startTime: '17:00', endTime: '23:59' },
+    ]);
+  });
+  it('returns nothing for no hours', () => {
+    expect(sittingsFromHours(null)).toEqual([]);
   });
 });

@@ -112,3 +112,26 @@ export function daysOutsideHours(hours: readonly HoursRange[] | null | undefined
 
 /** "Thu, Sat" for warnings. */
 export const dayList = (days: readonly number[]) => WEEK_ORDER.filter((d) => days.includes(d)).map((d) => DAY_SHORT[d]).join(', ');
+
+/**
+ * Own chamber: the doctor's sittings start as a copy of the chamber's opening hours. Days with the same time range
+ * become one sitting (Mon–Sat 9–9 → one sitting on six days); a split day (7–9 AM and 5–8 PM) gives two sittings.
+ * Sittings end by 23:59, so "till midnight" (24:00) becomes 23:59.
+ */
+export function sittingsFromHours(hours: readonly HoursRange[] | null | undefined): { weekdays: number[]; startTime: string; endTime: string }[] {
+  const groups = new Map<string, number[]>();
+  for (const r of hours ?? []) {
+    const end = r.close === '24:00' || r.close === '00:00' ? '23:59' : r.close;
+    if (hmToMinutes(end) <= hmToMinutes(r.open)) continue;
+    const key = `${r.open}-${end}`;
+    const days = groups.get(key) ?? [];
+    if (!days.includes(r.day)) days.push(r.day);
+    groups.set(key, days);
+  }
+  return [...groups.entries()]
+    .map(([key, days]) => {
+      const [startTime, endTime] = key.split('-');
+      return { weekdays: WEEK_ORDER.filter((d) => days.includes(d)), startTime, endTime };
+    })
+    .sort((a, b) => hmToMinutes(a.startTime) - hmToMinutes(b.startTime) || ((a.weekdays[0] + 6) % 7) - ((b.weekdays[0] + 6) % 7)); // Monday first
+}

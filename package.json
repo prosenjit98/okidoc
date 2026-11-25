@@ -18,9 +18,13 @@
     "dev:web": "npm run dev -w @okidoc/web",
     "dev:mobile": "npm run start -w @okidoc/mobile",
     "test": "npm run test -w @okidoc/shared && npm run test -w @okidoc/api",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "postinstall": "patch-package"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

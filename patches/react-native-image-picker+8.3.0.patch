@@ -1,0 +1,50 @@
+diff --git a/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java b/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
+index 4bd8732..48771a4 100644
+--- a/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
++++ b/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
+@@ -173,16 +173,21 @@ public class ImagePickerModuleImpl implements ActivityEventListener {
+     }
+ 
+     void onAssetsObtained(List<Uri> fileUris) {
++        // Okidoc patch: claim the callback before going async. React Native aborts the app if a callback runs twice,
++        // which happened when a result arrived twice before the background thread cleared it, or when invoke threw.
++        final Callback cb = callback;
++        callback = null;
++        if (cb == null) return;
+         ExecutorService executor = Executors.newSingleThreadExecutor();
+ 
+         executor.submit(() -> {
++            ReadableMap result;
+             try {
+-                callback.invoke(getResponseMap(fileUris, options, reactContext));
++                result = getResponseMap(fileUris, options, reactContext);
+             } catch (RuntimeException exception) {
+-                callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+-            } finally {
+-                callback = null;
++                result = getErrorMap(errOthers, exception.getMessage());
+             }
++            cb.invoke(result);
+         });
+     }
+ 
+@@ -198,14 +203,11 @@ public class ImagePickerModuleImpl implements ActivityEventListener {
+             if (requestCode == REQUEST_LAUNCH_IMAGE_CAPTURE) {
+                 deleteFile(fileUri);
+             }
+-            try {
+-                callback.invoke(getCancelMap());
+-                return;
+-            } catch (RuntimeException exception) {
+-                callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+-            } finally {
+-                callback = null;
+-            }
++            // Okidoc patch: invoke at most once (a throwing invoke used to be followed by a second invoke).
++            final Callback cb = callback;
++            callback = null;
++            cb.invoke(getCancelMap());
++            return;
+         }
+ 
+         switch (requestCode) {

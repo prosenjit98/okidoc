@@ -187,6 +187,12 @@ export const sittingSchema = z.object({
 });
 export type SittingInput = z.infer<typeof sittingSchema>;
 export const doctorSittingSchema = sittingSchema.extend({ linkId: z.string() });
+/**
+ * Save from the day-by-day sitting editor: one sitting per distinct time range. With `id` (editing a sitting) that
+ * sitting is updated with the matching range, so its bookings stay attached; the other ranges become new sittings.
+ */
+export const sittingSetSchema = z.object({ id: z.string().optional(), sittings: z.array(sittingSchema).min(1).max(21) });
+export const doctorSittingSetSchema = sittingSetSchema.extend({ linkId: z.string() });
 export const exceptionSchema = z.object({
   sittingId: z.string().optional().nullable(),
   fromDate: dateStr,
@@ -257,6 +263,14 @@ export const clinicSchema = z.object({
   payoutIfsc: z.string().max(20).optional().nullable(),
 });
 export type ClinicInput = z.infer<typeof clinicSchema>;
+/**
+ * A doctor registers their own chamber and sits there straight away (no link request to accept). Fee in paise.
+ * `sittings`: the doctor's (edited) sitting times; omitted = copied from the chamber's opening hours.
+ */
+export const ownChamberSchema = clinicSchema.extend({
+  consultationFee: z.number().int().min(0).max(10_000_00).default(0),
+  sittings: z.array(sittingSchema).max(21).optional(),
+});
 export const clinicUpdateSchema = clinicSchema.partial();
 export const clinicAddDoctorSchema = z
   .object({

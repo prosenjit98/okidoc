@@ -21,6 +21,8 @@
 | 0.4 | 2026-11-18 | Product | Patients rate the clinic as well as the doctor (PAT-16, PAT-07, CLN-29, ADM-13). |
 | 0.5 | 2026-11-19 | Product | Missed turn: late patients rejoin after a clinic-set number of patients, can tap "I'm here", or move to the doctor's next sitting (BR-06a, PAT-11a, CLN-20a). Public landing page on the web. |
 | 0.6 | 2026-11-19 | Product | No patient cancellation after the sitting starts; patients who do not visit are marked absent and notified (BR-12a, PAT-13). |
+| 0.7 | 2026-11-22 | Product | Clinics add their own area when it is not listed, anywhere in India (CLN-01b). Day-by-day opening hours with "Open now" and a warning for sittings outside them (CLN-01a). |
+| 0.8 | 2026-11-22 | Product | Admins add and edit areas one at a time and upload many from a CSV, with a preview before saving (ADM-10a). |
 
 ---
 
@@ -232,6 +234,8 @@ Bottom tabs on mobile and tablet: **Queue · Walk-in · Doctors · Records · Mo
 | ID | Requirement | Priority |
 |---|---|---|
 | CLN-01 | **Clinic registration:** name, type (Pharmacy chamber, Clinic, Polyclinic, Women's, Child, Dental, Eye, Bone & joint, …), address, GPS pin, area/PIN, contact, opening hours, photos. The clinic gets a unique **clinic code** (`OK-XXXXX`). | P0 |
+| CLN-01a | **Opening hours (day by day):** each weekday is closed or has up to 3 time ranges (e.g. Mon–Wed 10 AM–10 PM; Fri 7–9 AM and 5–8 PM; open till midnight allowed). Overlapping or backwards ranges are rejected. Patients see the week (days with the same hours grouped) and "Open now · closes 10 PM" / "Closed · opens Fri 7 AM" on clinic cards and the clinic page. A sitting saved outside the hours is kept but flagged to whoever saved it; the clinic is told when a doctor adds one. Clinics that only have the older free-text hours keep them until they switch. | P1 |
+| CLN-01b | **Add my area:** when the clinic's locality is not in the area list, the owner adds it (locality, PIN, district, state — any state or UT of India). A matching area (same name and PIN in that district) is reused instead of duplicated. Limit: 5 new areas per account per day. Admins can rename or deactivate areas (Taxonomy → Areas). | P0 |
 | CLN-02 | **Registered empty state:** "<Clinic> is registered ✓" with the code, the text "Your queue console opens as soon as your first doctor is added…", and **Add your first doctor**. | P0 |
 | CLN-03 | **Doctors & sittings roster:** a "Chamber roster" header card; summary counts for **Doctors**, **Scheduled** and **Active days**; search by doctor or specialty; a **Your doctors** list (avatar, name, specialty, degrees, status, number of sittings). Each row expands. | P0 |
 | CLN-04 | **Add doctor:** search existing Okidoc doctors by name, phone or registration number and send a connection request. If the doctor isn't on Okidoc, invite them by SMS or WhatsApp. | P0 |
@@ -306,6 +310,7 @@ Payment behaviour is **configurable at two levels**:
 | ADM-08 | **User management:** search any user, block or unblock, force logout, reset quick login, and view audit history. | P0 |
 | ADM-09 | **Bonuses & Prizes campaigns:** define a campaign (target metric such as patients onboarded or doctors added, reward ₹, period, eligible clinics), track progress and approve payouts. | P1 |
 | ADM-10 | **Taxonomy and content:** specialties and their patient-friendly names, the clinic types, symptom-to-specialty mapping (used by search and the Assistant), areas and PIN codes, and banner content. | P0 |
+| ADM-10a | **Areas and PIN codes:** the admin searches every area (active and inactive, by name, PIN, district or state) and sees how many clinics and people use each. The admin adds an area or edits one: name, Bengali name, PIN, district and state (moving it to that district), map location, and active. **CSV upload:** columns `area, pin, district, state` (required) and `area_bn, lat, lng, active` (optional); loose headers and state spellings are accepted. A preview lists each row as new, update, already listed or problem (bad PIN, unknown state, repeated row, half a location) before anything is saved; problem rows are skipped and a report can be downloaded. An area is identified by name + PIN + district, so re-uploading a file never creates duplicates. Areas are never deleted, only made inactive. | P0 |
 | ADM-11 | **Localization:** manage translation strings for each language, with a missing-translation report. | P1 |
 | ADM-12 | **Support tickets:** a ticket inbox with statuses, assignment and canned replies. | P1 |
 | ADM-13 | **Reviews moderation:** see each review's doctor rating, clinic rating and comment; hide or restore reviews and handle reports. Hiding or restoring recalculates both the doctor and the clinic averages. | P1 |
