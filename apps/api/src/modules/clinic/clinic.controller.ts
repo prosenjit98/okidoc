@@ -25,6 +25,8 @@ import {
   clinicAddDoctorSchema,
   clinicPaymentSettingsSchema,
   clinicSchema,
+  ownChamberSchema,
+  sittingsFromHours,
   clinicUpdateSchema,
   instanceActionSchema,
   liftBlockSchema,
@@ -33,6 +35,7 @@ import {
   openSlotSchema,
   PaymentMode,
   sittingSchema,
+  sittingSetSchema,
   staffSchema,
   walkInSchema,
   tidyPlace,
@@ -46,6 +49,7 @@ import { AppError, bad, conflict, forbidden, must, Zod } from '../../common/http
 import { PrismaService } from '../../common/prisma.service';
 import { findRegion, findSameArea, regionFor } from '../../common/areas';
 import { clinicHoursData, sittingOutsideHours } from '../../common/hours';
+import { saveSittingSet } from '../../common/sitting-set';
 import { AuditService } from '../../common/settings.service';
 import { config } from '../../config';
 import { AuthModule } from '../auth/auth.controller';
@@ -114,7 +118,42 @@ export class ClinicController {
   /** CLN-01 */
   @Roles('CLINIC_OWNER')
   @Post('clinics/register')
-  async register(@CurrentUser() u: AuthUser, @Body(new Zod(clinicSchema)) dto: z.infer<typeof clinicSchema>) {
+  register(@CurrentUser() u: AuthUser, @Body(new Zod(clinicSchema)) dto: z.infer<typeof clinicSchema>) {
+    return this.createClinic(u, dto);
+  }
+
+  /**
+   * A doctor sets up their own chamber in one step: the clinic is registered with them as owner and they are
+   * on its roster straight away (approved link, nothing to accept), so they can add sittings right after.
+   */
+  @Roles('DOCTOR')
+  @Post('clinics/own-chamber')
+  async ownChamber(@CurrentUser() u: AuthUser, @Body(new Zod(ownChamberSchema)) dto: z.infer<typeof ownChamberSchema>) {
+    const doctor = must(await this.prisma.doctor.findUnique({ where: { userId: u.id } }), 'Doctor profile');
+    const { consultationFee, sittings: sent, ...clinicDto } = dto;
+    // The doctor's sitting times: as edited on the form, or a copy of the chamber's opening hours.
+    const sittings: z.infer<typeof sittingSchema>[] = sent ?? sittingsFromHours(dto.weeklyHours).map((s) => ({ ...s, recurrence: 'WEEKLY' as const }));
+    if (sittings.some((s) => s.endTime <= s.startTime)) throw bad('BAD_TIME', 'Each sitting must end after it starts');
+    const clinic = await this.createClinic(u, clinicDto);
+    const link = await this.prisma.clinicDoctorLink.create({
+      data: { clinicId: clinic.id, doctorId: doctor.id, status: 'APPROVED', initiatedBy: 'DOCTOR', consultationFee, respondedAt: new Date() },
+    });
+    // The chamber exists now, so a plan limit must not fail the request (a retry would register a second chamber):
+    // save the sittings that fit and report the rest.
+    let created = 0;
+    for (const s of sittings) {
+      try {
+        await this.entitlements.requireWithinLimit(clinic.id, 'MAX_SITTINGS', created);
+      } catch {
+        break;
+      }
+      await this.prisma.sitting.create({ data: { ...s, linkId: link.id, specificDates: s.specificDates ?? [], validFrom: s.validFrom ?? todayIST(), createdById: u.id } });
+      created++;
+    }
+    return { clinic, linkId: link.id, sittings: created, sittingsSkipped: sittings.length - created };
+  }
+
+  private async createClinic(u: AuthUser, dto: z.infer<typeof clinicSchema>) {
     must(await this.prisma.area.findUnique({ where: { id: dto.areaId } }), 'Area');
     let code = genCode();
     while (await this.prisma.clinic.findUnique({ where: { code } })) code = genCode();
@@ -129,7 +168,8 @@ export class ClinicController {
    * A clinic whose locality is not in the area list adds it (anywhere in India). An existing area with the same
    * name and PIN in that district is reused, so patients see one entry. Okidoc admins can rename or merge later.
    */
-  @Roles('CLINIC_OWNER')
+  // Doctors too: setting up their own chamber uses the same area picker.
+  @Roles('CLINIC_OWNER', 'DOCTOR')
   @Post('areas')
   async addArea(@CurrentUser() u: AuthUser, @Body(new Zod(newAreaSchema)) dto: z.infer<typeof newAreaSchema>) {
     const name = tidyPlace(dto.name);
@@ -338,10 +378,23 @@ export class ClinicController {
     const doctor = must(await this.prisma.doctor.findUnique({ where: { id: doctorId! }, include: { user: true } }), 'Doctor');
     const existing = await this.prisma.clinicDoctorLink.findUnique({ where: { clinicId_doctorId: { clinicId: id, doctorId: doctor.id } } });
     if (existing && ['APPROVED', 'PENDING'].includes(existing.status)) throw conflict('ALREADY_LINKED', 'This doctor is already on your roster or has a pending request');
-    const data = { status: 'PENDING' as const, initiatedBy: 'CLINIC', consultationFee: dto.consultationFee, clinicSplitPercent: dto.clinicSplitPercent, declineReason: null };
+    // The owner adding themselves (a doctor running their own chamber) is approved at once: no request to accept.
+    const self = doctor.userId === u.id;
+    const data = {
+      status: self ? ('APPROVED' as const) : ('PENDING' as const),
+      initiatedBy: 'CLINIC',
+      consultationFee: dto.consultationFee,
+      clinicSplitPercent: dto.clinicSplitPercent,
+      declineReason: null,
+      respondedAt: self ? new Date() : null,
+    };
     const link = existing
       ? await this.prisma.clinicDoctorLink.update({ where: { id: existing.id }, data })
       : await this.prisma.clinicDoctorLink.create({ data: { ...data, clinicId: id, doctorId: doctor.id } });
+    if (self) {
+      this.realtime.emitClinic(id, 'roster:changed', { clinicId: id });
+      return { ...link, approved: true };
+    }
     await this.notifications.notify(doctor.userId, 'LINK_REQUEST', {
       title: 'New chamber request',
       body: `${clinic.name} wants to add you to their chamber roster.`,
@@ -395,6 +448,25 @@ export class ClinicController {
     await this.audit.log(u.id, 'LINK_REMOVED', 'ClinicDoctorLink', linkId, link);
     this.realtime.emitClinic(id, 'roster:changed', { clinicId: id });
     return { ok: true };
+  }
+
+  /** Day-by-day sitting editor: add several sittings at once, or edit one (keeping its bookings) and add others. */
+  @Post('clinic/:id/links/:linkId/sittings/set')
+  async setSittings(@CurrentUser() u: AuthUser, @Param('id') id: string, @Param('linkId') linkId: string, @Body(new Zod(sittingSetSchema)) dto: z.infer<typeof sittingSetSchema>) {
+    await this.access.check(u, id, 'owner');
+    const link = must(await this.prisma.clinicDoctorLink.findFirst({ where: { id: linkId, clinicId: id }, include: { doctor: true, clinic: true } }), 'Doctor');
+    if (link.status !== 'APPROVED') throw bad('LINK_NOT_APPROVED', 'The doctor has not accepted yet');
+    const r = await saveSittingSet(this.prisma, this.entitlements, { clinicId: id, linkId, editId: dto.id, sittings: dto.sittings, userId: u.id, weeklyHours: link.clinic.weeklyHours });
+    // A doctor running their own chamber doesn't need to be told about their own change.
+    if (link.doctor.userId !== u.id) {
+      await this.notifications.notify(link.doctor.userId, 'SITTING_CHANGED', {
+        title: r.updated ? 'Sitting changed' : 'New sitting added',
+        body: `${link.clinic.name} ${r.updated ? 'changed your sittings' : `added ${r.created > 1 ? `${r.created} sittings` : 'a sitting'}`}. Review it in My schedule.`,
+        data: { clinicId: id },
+      });
+    }
+    this.realtime.emitClinic(id, 'roster:changed', { clinicId: id });
+    return r;
   }
 
   @Post('clinic/:id/links/:linkId/sittings')

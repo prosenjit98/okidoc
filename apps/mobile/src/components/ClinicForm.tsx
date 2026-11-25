@@ -1,5 +1,5 @@
 import { CLINIC_TYPE_LABELS, CLINIC_TYPES, type ClinicType, type HoursRange } from '@okidoc/shared';
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { AreaPicker } from './AreaPicker';
 import { cleanHours, DEFAULT_HOURS, HoursEditor, hoursErrors } from './HoursEditor';
@@ -20,9 +20,32 @@ export interface ClinicFormValues {
 }
 
 /** Clinic profile form (CLN-01 / CLN-18). */
-export function ClinicForm({ initial, onSubmit, saving, submitLabel }: { initial?: Partial<ClinicFormValues>; onSubmit: (v: ClinicFormValues) => void; saving?: boolean; submitLabel: string }) {
+export function ClinicForm({
+  initial,
+  onSubmit,
+  saving,
+  submitLabel,
+  onChange,
+  children,
+  canSubmit = true,
+}: {
+  initial?: Partial<ClinicFormValues>;
+  onSubmit: (v: ClinicFormValues) => void;
+  saving?: boolean;
+  submitLabel: string;
+  /** Live values, e.g. so the own-chamber screen can copy the opening hours into the sitting times. */
+  onChange?: (v: Partial<ClinicFormValues>) => void;
+  /** Extra fields shown above the submit button. */
+  children?: ReactNode;
+  /** Extra condition from the parent's own fields. */
+  canSubmit?: boolean;
+}) {
   // New clinics start with Mon–Sat 9–9; existing clinics without structured hours keep their text until they switch.
   const [v, setV] = useState<Partial<ClinicFormValues>>({ type: 'PHARMACY_CHAMBER', ...initial, weeklyHours: initial ? (initial.weeklyHours ?? null) : DEFAULT_HOURS });
+  useEffect(() => {
+    onChange?.(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v]);
   const set = (k: keyof ClinicFormValues) => (x: string) => setV({ ...v, [k]: x });
   const valid = !!v.name && v.name.length > 1 && !!v.type && !!v.addressLine && v.addressLine.length > 2 && !!v.areaId && /^\d{6}$/.test(v.pin ?? '') && !(v.weeklyHours && hoursErrors(v.weeklyHours).length);
   return (
@@ -57,9 +80,10 @@ export function ClinicForm({ initial, onSubmit, saving, submitLabel }: { initial
       )}
       <Input label="About" value={v.about ?? ''} onChangeText={set('about')} multiline />
       {v.type === 'PHARMACY_CHAMBER' && <Input label="Drug licence number" value={v.drugLicenceNo ?? ''} onChangeText={set('drugLicenceNo')} />}
+      {children}
       <Button
         title={submitLabel}
-        disabled={!valid}
+        disabled={!valid || !canSubmit}
         loading={saving}
         onPress={() =>
           onSubmit({

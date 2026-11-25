@@ -73,9 +73,12 @@ export default function DoctorSchedule() {
           />
           <Button title={t('schedule.addSitting')} icon="add-circle-outline" disabled={!approved.length} onPress={() => router.push('/d/sitting')} />
           {!approved.length && (
-            <T variant="muted" style={{ marginTop: 8 }}>
-              Join a clinic first — ask the clinic to add you, or use its clinic code below.
-            </T>
+            <>
+              <T variant="muted" style={{ marginTop: 8 }}>
+                Sit at your own chamber, or join a clinic with its clinic code below.
+              </T>
+              <Button title="Set up my own chamber" icon="business-outline" tone="outline" style={{ marginTop: 8 }} onPress={() => router.push('/d/chamber')} />
+            </>
           )}
           {!!requests.length && (
             <Section title={t('schedule.requests')}>
@@ -150,6 +153,7 @@ export default function DoctorSchedule() {
                 {!l.sittings.length && <Badge text={t('roster.sittingNeeded')} tone="warn" />}
               </Card>
             ))}
+            {!!approved.length && <Button small tone="ghost" icon="add" title="Set up my own chamber" onPress={() => router.push('/d/chamber')} />}
           </Section>
           <Section title={t('schedule.daysOff')} action={t('schedule.addDayOff')} onAction={() => router.push('/d/dayoff')}>
             {s.exceptions.length ? (

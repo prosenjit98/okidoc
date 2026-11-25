@@ -70,18 +70,24 @@ export function Icon({ name, className = 'h-5 w-5', strokeWidth = 1.8 }: { name:
 export function BrandMark({ size = 40 }: { size?: number }) {
   // Unique per instance: a gradient defined inside a hidden copy (e.g. the desktop sidebar on phones) would not paint.
   const gid = `okm-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  // Same artwork as the app icon (apps/mobile/assets/brand/okidoc-icon.svg): open "O" ring, amber token, cross.
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden className="shrink-0 drop-shadow-[0_6px_18px_rgba(20,184,166,0.45)]">
       <defs>
         <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#2dd4bf" />
-          <stop offset="1" stopColor="#0d9488" />
+          <stop offset="0" stopColor="#3ee6c8" />
+          <stop offset="0.45" stopColor="#14b8a6" />
+          <stop offset="1" stopColor="#0b5a66" />
         </linearGradient>
       </defs>
-      <rect width="64" height="64" rx="18" fill={`url(#${gid})`} />
-      <circle cx="29" cy="29" r="14" fill="none" stroke="#fff" strokeWidth="6" />
-      <path d="M39 39l10 10" stroke="#fff" strokeWidth="6" strokeLinecap="round" />
-      <path d="M21 29h4l2-4 4 8 2-4h4" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <rect width="64" height="64" rx="16" fill={`url(#${gid})`} />
+      <g transform="translate(32 32) scale(0.92) translate(-32 -32)">
+        <path d="M48.42 27.6A17 17 0 1 1 30.52 15.06" fill="none" stroke="#fff" strokeWidth="7.5" strokeLinecap="round" />
+        <circle cx="41.75" cy="18.07" r="5" fill="#ffc65a" />
+        <path fill="#fff" d={BRAND_CROSS} />
+      </g>
     </svg>
   );
 }
+const BRAND_CROSS =
+  'M29 26.7a2.2 2.2 0 0 1 2.2-2.2h1.6a2.2 2.2 0 0 1 2.2 2.2V29h2.3a2.2 2.2 0 0 1 2.2 2.2v1.6a2.2 2.2 0 0 1-2.2 2.2H35v2.3a2.2 2.2 0 0 1-2.2 2.2h-1.6a2.2 2.2 0 0 1-2.2-2.2V35h-2.3a2.2 2.2 0 0 1-2.2-2.2v-1.6a2.2 2.2 0 0 1 2.2-2.2H29z';

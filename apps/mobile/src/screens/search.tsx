@@ -97,7 +97,7 @@ export default function Search() {
                 </Section>
               )}
               {!search.data.doctors.length && !search.data.clinics.length && !search.data.specialties.length && !search.data.areas.length && (
-                <Empty icon="search-outline" title="No results" body="Try a symptom like 'fever', a speciality, a clinic name or a PIN code." />
+                <Empty icon="search-outline" title="No results" body="Try a doctor's name, a symptom like 'fever', a speciality, a clinic name or a PIN code." />
               )}
             </>
           ) : null}

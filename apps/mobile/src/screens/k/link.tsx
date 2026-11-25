@@ -14,7 +14,7 @@ import type { Roster } from '@/screens/console/doctors';
 /** CLN-06 a doctor's weekly chamber plan at this clinic, fee/split and walk-in reservation (BR-01). */
 export default function LinkDetail() {
   const { linkId } = useLocalSearchParams<{ linkId: string }>();
-  const { clinicId } = useClinic();
+  const { clinicId, clinic } = useClinic();
   const roster = useApi<Roster>(['roster', clinicId, ''], clinicId ? `/clinic/${clinicId}/doctors` : null);
   const link = roster.data?.doctors.find((l) => l.linkId === linkId);
   const [fee, setFee] = useState('');
@@ -31,7 +31,8 @@ export default function LinkDetail() {
   const inv = { invalidate: [['roster'], ['clinic-queue']] };
   const saveLink = useAction(() => api(`/clinic/${clinicId}/links/${linkId}`, { method: 'PATCH', body: { consultationFee: Math.round(Number(fee) * 100), clinicSplitPercent: Number(split), walkInEvery } }), inv);
   const saveSitting = useAction(
-    (v: SittingValues) => (edit?.id ? api(`/clinic/${clinicId}/sittings/${edit.id}`, { method: 'PATCH', body: v }) : api(`/clinic/${clinicId}/links/${linkId}/sittings`, { body: v })),
+    // Day-by-day editor: one sitting per time range; editing keeps this sitting for its matching range.
+    (sittings: SittingValues[]) => api(`/clinic/${clinicId}/links/${linkId}/sittings/set`, { body: { id: edit?.id, sittings } }),
     {
       ...inv,
       onSuccess: (r: { outsideHours?: number[] }) => {
@@ -94,13 +95,14 @@ export default function LinkDetail() {
         {edit && (
           <SittingForm
             initial={edit}
+            defaultHours={clinic?.weeklyHours}
             saving={saveSitting.isPending}
             onSave={(v) => saveSitting.mutate(v)}
             onDelete={
               edit.id
                 ? async () => {
-                  if (await confirm('Remove sitting', 'No new bookings will be taken for it.', 'Remove', true)) removeSitting.mutate(edit.id!);
-                }
+                    if (await confirm('Remove sitting', 'No new bookings will be taken for it.', 'Remove', true)) removeSitting.mutate(edit.id!);
+                  }
                 : undefined
             }
           />

@@ -34,6 +34,7 @@ import DayOff from '@/screens/d/dayoff';
 import DoctorFreeHours from '@/screens/d/freehours';
 import DoctorOpenSlots from '@/screens/d/openslots';
 import DoctorSitting from '@/screens/d/sitting';
+import OwnChamber from '@/screens/d/chamber';
 import Verify from '@/screens/d/verify';
 import DoctorPage from '@/screens/doctor/detail';
 import Index from '@/screens/index';
@@ -97,6 +98,7 @@ const APP: Record<string, ComponentType> = {
   'account/privacy': AccountPrivacy,
   'd/verify': Verify,
   'd/sitting': DoctorSitting,
+  'd/chamber': OwnChamber,
   'd/dayoff': DayOff,
   'd/freehours': DoctorFreeHours,
   'd/openslots': DoctorOpenSlots,

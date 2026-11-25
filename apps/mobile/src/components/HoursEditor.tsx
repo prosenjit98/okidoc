@@ -50,15 +50,46 @@ function TimeBox({ value, onChange, label, close }: { value: string; onChange: (
  * CLN-01a weekly opening hours: each day closed or up to 3 time ranges (e.g. 7–9 AM and 5–8 PM).
  * Patients see a summary and "Open now"; doctor sittings outside these hours get a warning.
  */
-export function HoursEditor({ value, onChange }: { value: HoursRange[]; onChange: (v: HoursRange[]) => void }) {
+export function HoursEditor({
+  value,
+  onChange,
+  label = 'Opening hours',
+  note,
+  action,
+  onText = 'Open',
+  offText = 'Closed',
+  emptyText,
+}: {
+  value: HoursRange[];
+  onChange: (v: HoursRange[]) => void;
+  label?: string;
+  /** Day state words, e.g. "Sitting" / "Off" for a doctor's sitting times. */
+  onText?: string;
+  offText?: string;
+  /** Neutral hint while no day is on (instead of the red "Open at least one day"). */
+  emptyText?: string;
+  /** Replaces the "Patients see: …" line under the editor. */
+  note?: string;
+  /** Optional link shown next to the label (e.g. "Same as opening hours"). */
+  action?: { title: string; onPress: () => void };
+}) {
   const setDay = (day: number, ranges: Omit<HoursRange, 'day'>[]) => onChange([...value.filter((r) => r.day !== day), ...ranges.map((r) => ({ ...r, day }))]);
   const errors = hoursErrors(value);
 
   return (
     <View style={{ marginBottom: 14 }}>
-      <T variant="label" style={{ marginBottom: 6 }}>
-        Opening hours
-      </T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+        <T variant="label" style={{ flex: 1 }}>
+          {label}
+        </T>
+        {action && (
+          <Pressable onPress={action.onPress} hitSlop={6}>
+            <T variant="small" style={{ color: C.tealDark, fontWeight: '700' }}>
+              {action.title}
+            </T>
+          </Pressable>
+        )}
+      </View>
       <View style={{ borderWidth: 1, borderColor: C.line, borderRadius: R.card, backgroundColor: C.white, overflow: 'hidden' }}>
         {WEEK_ORDER.map((day, idx) => {
           const ranges = rangesForDay(value, day);
@@ -69,7 +100,7 @@ export function HoursEditor({ value, onChange }: { value: HoursRange[]; onChange
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <T style={{ flex: 1, fontWeight: '700' }}>{DAY_FULL[day]}</T>
                 <T variant="small" style={{ color: open ? C.tealDark : C.muted, marginRight: 6 }}>
-                  {open ? 'Open' : 'Closed'}
+                  {open ? onText : offText}
                 </T>
                 <Switch
                   value={open}
@@ -111,13 +142,17 @@ export function HoursEditor({ value, onChange }: { value: HoursRange[]; onChange
           );
         })}
       </View>
-      {errors.length ? (
+      {!value.length && emptyText ? (
+        <T variant="small" style={{ color: C.muted, marginTop: 6 }}>
+          {emptyText}
+        </T>
+      ) : errors.length ? (
         <T variant="small" style={{ color: C.bad, marginTop: 6, fontWeight: '600' }}>
           {errors[0]}
         </T>
       ) : (
         <T variant="small" style={{ color: C.muted, marginTop: 6 }}>
-          Patients see: {weeklyHoursText(cleanHours(value))}. Use 24-hour time; closing 00:00 = open till midnight.
+          {note ?? `Patients see: ${weeklyHoursText(cleanHours(value))}. Use 24-hour time; closing 00:00 = open till midnight.`}
         </T>
       )}
     </View>

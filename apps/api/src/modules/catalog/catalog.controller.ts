@@ -37,7 +37,7 @@ const clinicCardSelect = {
   lng: true,
   ratingAvg: true,
   ratingCount: true,
-  // CLN-01a: structured clinic opening hours
+  /** CLN-01a: lets lists show "Open now". */
   weeklyHours: true,
   area: { select: { id: true, name: true, nameBn: true, region: { select: { district: true } } } },
 } satisfies Prisma.ClinicSelect;
@@ -55,7 +55,7 @@ export class CatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scheduling: SchedulingService,
-  ) { }
+  ) {}
 
   private visibleClinic = { verification: 'APPROVED' as const, active: true };
   private visibleDoctor = { verification: 'APPROVED' as const };
@@ -102,17 +102,17 @@ export class CatalogService {
     const rows = instances.length
       ? instances
       : await this.prisma.sittingInstance.findMany({
-        where: {
-          date: today,
-          status: { in: ['SCHEDULED', 'ONLINE', 'PAUSED'] },
-          sitting: { link: { status: 'APPROVED', clinic: { ...this.visibleClinic, ...scope }, ...specFilter } },
-        },
-        include: {
-          sitting: { include: { link: { include: { clinic: { select: clinicCardSelect }, doctor: { include: doctorCardInclude } } } } },
-          _count: { select: { bookings: { where: { status: { in: ['BOOKED', 'PRESENT', 'LATE', 'SKIPPED'] } } } } },
-        },
-        orderBy: { startTime: 'asc' },
-      });
+          where: {
+            date: today,
+            status: { in: ['SCHEDULED', 'ONLINE', 'PAUSED'] },
+            sitting: { link: { status: 'APPROVED', clinic: { ...this.visibleClinic, ...scope }, ...specFilter } },
+          },
+          include: {
+            sitting: { include: { link: { include: { clinic: { select: clinicCardSelect }, doctor: { include: doctorCardInclude } } } } },
+            _count: { select: { bookings: { where: { status: { in: ['BOOKED', 'PRESENT', 'LATE', 'SKIPPED'] } } } } },
+          },
+          orderBy: { startTime: 'asc' },
+        });
     const card = (i: (typeof rows)[number]) => ({
       instanceId: i.id,
       sittingId: i.sittingId,
@@ -222,16 +222,21 @@ export class CatalogService {
       take: 6,
     });
     const isPin = /^\d{6}$/.test(term);
-    const [doctors, clinics, areas] = await Promise.all([
+    // Doctor by name: ignore a leading "Dr"/"Doctor" and match every word in any order ("ghosh ananya", "dr ananya").
+    const nameWords = lower.replace(/^(dr\.?|doctor)\s+/, '').split(/[\s.]+/).filter((w) => w.length > 1);
+    const byName = nameWords.length ? { AND: nameWords.map((w) => ({ user: { name: { contains: w, mode: 'insensitive' as const } } })) } : { user: { name: ci } };
+    const bookable = (clinicScope: object) => ({ ...this.visibleDoctor, links: { some: { status: 'APPROVED' as const, clinic: { ...this.visibleClinic, ...clinicScope } } } });
+    const [nearby, byNameAnywhere, clinics, areas] = await Promise.all([
       this.prisma.doctor.findMany({
         where: {
-          ...this.visibleDoctor,
-          links: { some: { status: 'APPROVED', clinic: { ...this.visibleClinic, ...scope } } },
-          OR: [{ user: { name: ci } }, { degrees: ci }, ...(specialties.length ? [{ specialties: { some: { id: { in: specialties.map((s) => s.id) } } } }] : [])],
+          ...bookable(scope),
+          OR: [byName, { degrees: ci }, ...(specialties.length ? [{ specialties: { some: { id: { in: specialties.map((s) => s.id) } } } }] : [])],
         },
         include: doctorCardInclude,
         take: 20,
       }),
+      // A patient typing a doctor's name wants that doctor even if they sit outside the chosen area (listed after nearby ones).
+      this.prisma.doctor.findMany({ where: { ...bookable({}), ...byName }, include: doctorCardInclude, take: 20 }),
       this.prisma.clinic.findMany({
         where: {
           ...this.visibleClinic,
@@ -246,6 +251,8 @@ export class CatalogService {
         take: 8,
       }),
     ]);
+    const seen = new Set(nearby.map((d) => d.id));
+    const doctors = [...nearby, ...byNameAnywhere.filter((d) => !seen.has(d.id))].slice(0, 20);
     return { doctors: doctors.map(doctorCard), clinics, specialties, areas };
   }
 }
@@ -257,9 +264,8 @@ export class CatalogController {
     private readonly catalog: CatalogService,
     private readonly prisma: PrismaService,
     private readonly scheduling: SchedulingService,
-  ) { }
+  ) {}
 
-  @Get('areas')
   @Get('areas')
   areas(@Query('q') q?: string, @Query('regionId') regionId?: string, @Query('id') id?: string) {
     q = q?.trim();
@@ -267,7 +273,7 @@ export class CatalogController {
     return this.prisma.area.findMany({
       where: {
         active: true,
-        // id = look up one area directly (a saved choice may be beyond the first 200 rows).
+        // `id` = look up one area directly (a saved choice may be beyond the first 200 rows).
         ...(id ? { id } : {}),
         ...(regionId ? { regionId } : {}),
         ...(ci ? { OR: [{ name: ci }, { nameBn: ci }, { pin: { startsWith: q } }, { region: { district: ci } }, { region: { state: ci } }] } : {}),
@@ -335,4 +341,4 @@ export class CatalogController {
 }
 
 @Module({ controllers: [CatalogController], providers: [CatalogService], exports: [CatalogService] })
-export class CatalogModule { }
+export class CatalogModule {}

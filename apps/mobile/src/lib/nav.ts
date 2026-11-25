@@ -23,7 +23,7 @@ export const STACK_PATTERNS = [
   'intro', 'welcome', 'language', 'role', 'signup', 'otp', 'backup', 'quick-setup', 'login', 'unlock', 'forgot',
   'area', 'search', 'scan', 'clinic/:id', 'doctor/:id', 'book', 'booking/:id', 'notifications', 'support',
   'account/profile', 'account/family', 'account/standing', 'account/security', 'account/notification-settings', 'account/roles', 'account/privacy',
-  'd/verify', 'd/sitting', 'd/dayoff', 'd/freehours', 'd/openslots',
+  'd/verify', 'd/sitting', 'd/chamber', 'd/dayoff', 'd/freehours', 'd/openslots',
   'k/select', 'k/register', 'k/add-doctor', 'k/link/:linkId', 'k/staff', 'k/earnings', 'k/profile', 'k/fees', 'k/poster',
   'k/openslots', 'k/bonuses', 'k/subscription', 'k/blocks', 'k/reviews', 'k/account',
 ] as const;

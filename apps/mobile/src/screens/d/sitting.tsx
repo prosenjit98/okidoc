@@ -1,16 +1,16 @@
 import { router, useLocalSearchParams } from '@/lib/nav';
 import { useState } from 'react';
-import { dayList } from '@okidoc/shared';
+import { dayList, type HoursRange } from '@okidoc/shared';
 import { Alert, View } from 'react-native';
-import { SittingForm } from '@/components/SittingForm';
-import { Chip, Loading, Screen, T } from '@/components/ui';
+import { SittingForm, type SittingValues } from '@/components/SittingForm';
+import { Chip, Empty, Loading, Screen, T } from '@/components/ui';
 import { api } from '@/lib/api';
 import { confirm, useAction, useApi } from '@/lib/hooks';
 import { useT } from '@/lib/i18n';
 import type { SittingRow } from '@/lib/types';
 
 interface Schedule {
-  links: { id: string; status: string; clinic: { name: string }; sittings: SittingRow[] }[];
+  links: { id: string; status: string; clinic: { name: string; weeklyHours?: HoursRange[] | null }; sittings: SittingRow[] }[];
 }
 
 /** DOC-03 add / edit a sitting at one of the doctor's chambers. */
@@ -19,12 +19,14 @@ export default function DoctorSitting() {
   const { id, linkId: linkParam } = useLocalSearchParams<{ id?: string; linkId?: string }>();
   const q = useApi<Schedule>(['doctor-schedule'], '/doctor/schedule');
   const approved = q.data?.links.filter((l) => l.status === 'APPROVED') ?? [];
+  const pending = q.data?.links.some((l) => l.status === 'PENDING') ?? false;
   const existing = id ? approved.flatMap((l) => l.sittings).find((s) => s.id === id) : undefined;
   const [linkId, setLinkId] = useState<string | null>(linkParam ?? null);
   const effLink = existing?.linkId ?? linkId ?? approved[0]?.id ?? null;
 
   const save = useAction(
-    (v: object) => (id ? api(`/doctor/sittings/${id}`, { method: 'PATCH', body: v }) : api('/doctor/sittings', { body: { ...v, linkId: effLink } })),
+    // Day-by-day editor: one sitting per time range; editing keeps this sitting for its matching range.
+    (sittings: SittingValues[]) => api('/doctor/sittings/set', { body: { id, linkId: effLink, sittings } }),
     {
       invalidate: [['doctor-schedule'], ['doctor-queue']],
       onSuccess: (r: { outsideHours?: number[] }) => {
@@ -40,6 +42,19 @@ export default function DoctorSitting() {
     <Screen back tabs={false} title={id ? 'Edit sitting' : t('schedule.addSitting')}>
       {q.isLoading ? (
         <Loading />
+      ) : !id && !approved.length ? (
+        // A sitting belongs to a chamber; without one there is nothing to save it to (the API would reject it).
+        <Empty
+          icon="business-outline"
+          title="Where do you sit?"
+          body={
+            pending
+              ? 'Your clinic request is waiting for approval. Meanwhile you can set up your own chamber and add sittings there.'
+              : 'Set up your own chamber in one step, or join a clinic with its clinic code from My schedule.'
+          }
+          action="Set up my own chamber"
+          onAction={() => router.replace('/d/chamber')}
+        />
       ) : (
         <>
           {!id && (
@@ -56,14 +71,16 @@ export default function DoctorSitting() {
           )}
           {(id ? !!existing : true) && (
             <SittingForm
+              key={existing?.id ?? effLink ?? 'new'}
               initial={existing}
+              defaultHours={approved.find((l) => l.id === effLink)?.clinic.weeklyHours}
               saving={save.isPending}
               onSave={(v) => save.mutate(v)}
               onDelete={
                 id
                   ? async () => {
-                    if (await confirm('Remove sitting', 'Future bookings stay valid; no new bookings will be taken.', 'Remove', true)) remove.mutate();
-                  }
+                      if (await confirm('Remove sitting', 'Future bookings stay valid; no new bookings will be taken.', 'Remove', true)) remove.mutate();
+                    }
                   : undefined
               }
             />

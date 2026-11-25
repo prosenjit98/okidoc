@@ -46,7 +46,8 @@ react {
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
+    // Hoisted to the repository root by npm workspaces (Okidoc/node_modules/hermes-compiler).
+    hermesCommand = "$rootDir/../../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
@@ -83,8 +84,18 @@ android {
         applicationId "in.okidoc.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2"
+    }
+    // One APK per CPU type instead of a single APK carrying every type's native libraries.
+    // run-android installs the right one; Play Store uploads use the .aab (bundleRelease), which ignores this.
+    splits {
+        abi {
+            enable true
+            reset()
+            include(*(findProperty("reactNativeArchitectures") ?: "armeabi-v7a,arm64-v8a").split(","))
+            universalApk false
+        }
     }
     signingConfigs {
         debug {
@@ -117,6 +128,13 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// The React Native bundle task only tracks .js/.ts sources, so a changed image (e.g. src/assets/logo-mark.png)
+// would leave the previous copy in the APK. Make the app's images inputs too, so any image change re-bundles.
+tasks.matching { it.name.startsWith("createBundle") && it.name.endsWith("JsAndAssets") }.configureEach {
+    inputs.files(fileTree(dir: "../../src", includes: ["**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.webp", "**/*.gif"]))
+        .withPropertyName("imageAssets")
 }
 
 // Firebase (push via FCM). Add android/app/google-services.json from the Firebase console;

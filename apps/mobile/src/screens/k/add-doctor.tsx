@@ -33,7 +33,7 @@ export default function AddDoctor() {
 
   const add = useAction(
     () =>
-      api<{ invited?: boolean }>(`/clinic/${clinicId}/doctors`, {
+      api<{ invited?: boolean; approved?: boolean }>(`/clinic/${clinicId}/doctors`, {
         body: {
           ...(mode === 'search' ? { doctorId: picked!.id } : { invitePhone: normalizePhone(phone) }),
           consultationFee: Math.round(Number(fee || 0) * 100),
@@ -43,6 +43,11 @@ export default function AddDoctor() {
     {
       invalidate: [['roster'], ['clinic-info']],
       onSuccess: (r) => {
+        // Adding yourself (your own chamber) is approved at once.
+        if (r?.approved) {
+          Alert.alert('Added to your roster', 'You are on this clinic’s roster. Add your sittings now.');
+          return router.back();
+        }
         Alert.alert(r?.invited ? 'Invitation sent' : 'Request sent', r?.invited ? `We sent an SMS with your clinic code ${clinic?.code}.` : 'The doctor will see your request in their app. Add sittings once they accept.');
         router.back();
       },

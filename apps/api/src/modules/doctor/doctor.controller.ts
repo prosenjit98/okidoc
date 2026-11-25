@@ -4,6 +4,7 @@ import {
   addDays,
   doctorProfileSchema,
   doctorSittingSchema,
+  doctorSittingSetSchema,
   exceptionSchema,
   freeHoursSchema,
   instanceActionSchema,
@@ -16,6 +17,7 @@ import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../../common/auth';
 import { bad, forbidden, must, Zod } from '../../common/http';
 import { sittingOutsideHours } from '../../common/hours';
+import { saveSittingSet } from '../../common/sitting-set';
 import { PrismaService } from '../../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EntitlementsService } from '../platform/platform.services';
@@ -39,7 +41,7 @@ export class DoctorController {
     private readonly entitlements: EntitlementsService,
     private readonly earnings: EarningsService,
     private readonly storage: StorageService,
-  ) { }
+  ) {}
 
   private async doctor(u: AuthUser) {
     return must(await this.prisma.doctor.findUnique({ where: { userId: u.id } }), 'Doctor profile');
@@ -107,7 +109,7 @@ export class DoctorController {
     const links = await this.prisma.clinicDoctorLink.findMany({
       where: { doctorId: d.id, status: { in: ['APPROVED', 'PENDING'] } },
       include: {
-        clinic: { select: { id: true, name: true, phone: true, addressLine: true, code: true, area: { select: { name: true } } } },
+        clinic: { select: { id: true, name: true, phone: true, addressLine: true, code: true, weeklyHours: true, area: { select: { name: true } } } },
         sittings: { where: { active: true }, orderBy: { startTime: 'asc' } },
       },
     });
@@ -162,6 +164,24 @@ export class DoctorController {
     const outsideHours = await this.outsideClinicHours(link.clinicId, s);
     await this.notifyClinicOfChange(link.clinicId, `Dr. ${u.name} added a sitting (${dto.startTime}–${dto.endTime})${outsideHours.length ? ' outside your opening hours' : ''}.`);
     return { ...s, outsideHours };
+  }
+
+  /** Day-by-day sitting editor: add several sittings at once, or edit one (keeping its bookings) and add others. */
+  @Post('sittings/set')
+  async setSittings(@CurrentUser() u: AuthUser, @Body(new Zod(doctorSittingSetSchema)) dto: z.infer<typeof doctorSittingSetSchema>) {
+    const d = await this.doctor(u);
+    const link = await this.ownLink(d.id, dto.linkId);
+    const r = await saveSittingSet(this.prisma, this.entitlements, {
+      clinicId: link.clinicId,
+      linkId: link.id,
+      editId: dto.id,
+      sittings: dto.sittings,
+      userId: u.id,
+      weeklyHours: link.clinic.weeklyHours,
+    });
+    const what = r.updated ? (r.created ? `changed a sitting and added ${r.created} more` : 'changed a sitting') : r.created > 1 ? `added ${r.created} sittings` : 'added a sitting';
+    await this.notifyClinicOfChange(link.clinicId, `Dr. ${u.name} ${what}${r.outsideHours.length ? ' outside your opening hours' : ''}.`);
+    return r;
   }
 
   @Patch('sittings/:id')
@@ -264,6 +284,17 @@ export class DoctorController {
     const clinic = must(await this.prisma.clinic.findUnique({ where: { code: dto.clinicCode.toUpperCase() } }), 'Clinic');
     const existing = await this.prisma.clinicDoctorLink.findUnique({ where: { clinicId_doctorId: { clinicId: clinic.id, doctorId: d.id } } });
     if (existing && ['APPROVED', 'PENDING'].includes(existing.status)) throw bad('ALREADY_LINKED', 'You already have a connection with this clinic');
+    // Joining a clinic you own (your own chamber) needs no approval from yourself.
+    if (clinic.ownerId === u.id) {
+      const count = await this.prisma.clinicDoctorLink.count({ where: { clinicId: clinic.id, status: 'APPROVED' } });
+      await this.entitlements.requireWithinLimit(clinic.id, 'MAX_DOCTORS', count);
+      const data = { status: 'APPROVED' as const, initiatedBy: 'DOCTOR', declineReason: null, respondedAt: new Date() };
+      const link = existing
+        ? await this.prisma.clinicDoctorLink.update({ where: { id: existing.id }, data })
+        : await this.prisma.clinicDoctorLink.create({ data: { ...data, clinicId: clinic.id, doctorId: d.id } });
+      this.realtime.emitClinic(clinic.id, 'roster:changed', { clinicId: clinic.id });
+      return link;
+    }
     const link = existing
       ? await this.prisma.clinicDoctorLink.update({ where: { id: existing.id }, data: { status: 'PENDING', initiatedBy: 'DOCTOR', declineReason: null } })
       : await this.prisma.clinicDoctorLink.create({ data: { clinicId: clinic.id, doctorId: d.id, initiatedBy: 'DOCTOR' } });
@@ -391,4 +422,4 @@ export class DoctorController {
 }
 
 @Module({ controllers: [DoctorController] })
-export class DoctorModule { }
+export class DoctorModule {}
