@@ -29,6 +29,9 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/mobile/package.json apps/mobile/
+# The root postinstall runs patch-package for the mobile app's native libraries, which these images never install
+# (and the --omit=dev stage doesn't have patch-package at all). Drop it here only; local installs still apply patches.
+RUN npm pkg delete scripts.postinstall
 
 # ---------------------------------------------------------------- build (all dev deps)
 FROM manifests AS build
